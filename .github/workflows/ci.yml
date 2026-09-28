@@ -10,8 +10,8 @@ jobs:
       fail-fast: false
       matrix: { python: ["3.11", "3.12", "3.13"] }
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
         with: { python-version: "${{ matrix.python }}", enable-cache: true }
       # every extra is light (no torch / CUDA); the dev group (pytest, ruff, pyright) is synced by default
       - run: uv sync --extra openai --extra langchain --extra models --extra cli --frozen
@@ -24,13 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
       - run: uv build
       - name: Smoke test the wheel in a clean env
         run: |
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/python -c "import hone_select; print(hone_select.__version__)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: dist, path: dist/ }
