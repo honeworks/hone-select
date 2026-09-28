@@ -1,0 +1,9 @@
+[generate]
+n = 5
+
+[score]
+gates = ["not_too_long"]
+cascade = [{ scorers = ["shorter_is_better"] }]
+
+[select]
+policy = "argmax"

@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-1",
+  "object": "chat.completion",
+  "created": 1790000000,
+  "model": "gpt-4.1-mini-2025-04-14",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"q1\": {\"rationale\": \"it says blue\", \"answer\": \"yes\"}, \"q2\": {\"rationale\": \"blue\", \"answer\": \"blue\"}, \"q3\": {\"rationale\": \"plain\", \"answer\": 4}}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 40,
+    "total_tokens": 160
+  }
+}

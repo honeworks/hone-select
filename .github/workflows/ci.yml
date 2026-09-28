@@ -1,0 +1,36 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: { python: ["3.11", "3.12", "3.13"] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { python-version: "${{ matrix.python }}", enable-cache: true }
+      # every extra is light (no torch / CUDA); the dev group (pytest, ruff, pyright) is synced by default
+      - run: uv sync --extra openai --extra langchain --extra models --extra cli --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      # the default suite: pyproject's addopts deselect the gpu / ollama / comfyui / hosted markers
+      - run: uv run pytest --cov --cov-fail-under=90
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - name: Smoke test the wheel in a clean env
+        run: |
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/python -c "import hone_select; print(hone_select.__version__)"
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }

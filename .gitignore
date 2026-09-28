@@ -1,0 +1,59 @@
+# virtual environments
+.venv/
+venv/
+env/
+
+# caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.hypothesis/
+.cache/
+
+# coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# build artefacts
+dist/
+build/
+*.egg-info/
+*.whl
+
+# honeworks stores and run output
+.hone/
+out/
+runs/
+
+# generated media
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.mp4
+*.webm
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+
+# secrets and local settings
+.env
+.env.*
+*.pem
+*.key
+
+# editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+*.log

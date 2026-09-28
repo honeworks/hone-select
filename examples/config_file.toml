@@ -1,0 +1,31 @@
+# The selection config used by config_file.py. Every section is optional; see docs/config.md.
+
+[generate]
+n = 4
+vary = { temperature = [0.2, 0.8] }     # each candidate gets params = {"temperature": ...}, cycling
+
+[dedup]
+method = "exact"                        # drop candidates with the same id
+
+[score]
+gates = ["has_verb"]
+cascade = [
+  { scorers = ["brevity"], keep_top = 2 },   # cheap code scorer first ...
+  { scorers = ["clarity"] },                 # ... the judge only sees the best two
+]
+weights = { brevity = 1, clarity = 2 }       # clarity counts twice as much
+
+[scorers.clarity]                       # a prompt scorer defined here, without code
+kind = "prompt"
+judge = "reviewer"                      # a name: Engine(..., judges={"reviewer": client})
+criteria = "The headline is clear to a reader who has not seen the article."
+scale = [1, 5]
+anchors = { 1 = "confusing", 5 = "instantly clear" }
+field = "headline"                      # the judge sees candidate.data["headline"]
+cost = 5
+
+[select]
+policy = "argmax"
+
+[record]
+sink = "none"                           # keep no span store here; see records_and_explain.py

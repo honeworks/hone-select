@@ -1,0 +1,57 @@
+# The config example from docs/config.md
+[judges.local]
+client = "hone_models:decision"
+model  = "qwen2.5vl-7b"
+
+[generate]
+n = 6
+vary = { seed = "increment", temperature = [0.8, 0.9, 1.0] }
+max_concurrency = 1
+
+[dedup]
+method = "exact"
+
+[score]
+gates   = ["hook_on_rhyme"]
+cascade = [
+  { scorers = ["syllable_balance"],             keep_top = 4 },
+  { scorers = ["lyric_recall", "singability"],  keep_top = 2 },
+]
+weights   = { syllable_balance = 0.2, lyric_recall = 0.5, singability = 0.3 }
+aggregate = "weighted_mean"
+floor     = 0.3
+missing   = "renormalize"
+
+[scorers.singability]
+kind = "prompt"
+judge = "local"
+criteria = "The chorus can be sung back after one listen: natural word order, no tongue-twisters."
+output = "score"
+scale = [1, 5]
+anchors = { 1 = "flat", 3 = "competent", 5 = "instantly singable" }
+field = "lyrics"
+cost = 5
+
+[scorers.tests_pass]
+kind = "command"
+command = ["./scripts/run_tests.sh"]
+cost = 20
+
+[select]
+policy         = "argmax"
+threshold      = 0.75
+tie_margin     = 0.03
+min_confidence = 0.6
+escalate       = "pairwise"
+pairwise       = "better_lyric"
+fallback       = "best_rejected"
+
+[budget]
+max_cost = 1000
+max_seconds = 3600
+max_money_usd = 2.0
+
+[record]
+sink = "sqlite"
+path = ".hone/select/spans.db"
+capture_content = true
