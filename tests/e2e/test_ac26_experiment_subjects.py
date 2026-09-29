@@ -121,3 +121,88 @@ def test_ac26_a_command_timeout_kills_it(tmp_path: Path) -> None:
     (row,) = results(folder)
     assert row["error"] == "timeout after 0.5 s"
     assert row["measurements"]["seconds"] < 10
+
+
+TEMPFAIL_SCRIPT = """
+import json, sys, pathlib
+p = json.loads(sys.stdin.read())
+marker = pathlib.Path(p["workdir"]).parent / "attempts"
+tries = int(marker.read_text()) + 1 if marker.exists() else 1
+marker.write_text(str(tries))
+if p["setup"]["mode"] == "always" or tries < 2:
+    sys.exit(75)
+print(json.dumps({"data": f"ok after {tries}"}))
+"""
+
+
+@pytest.mark.parametrize(
+    ("mode", "data", "error", "tries"),
+    [("once", "ok after 2", None, "2"), ("always", None, "exit code 75", "3")],
+)
+def test_ac26_exit_code_75_is_retried(
+    tmp_path: Path, mode: str, data: str | None, error: str | None, tries: str
+) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "tempfail.py").write_text(TEMPFAIL_SCRIPT)
+    exp = experiment(
+        'kind = "command"\ncommand = ["python3", "{root}/scripts/tempfail.py"]\nretries = 2',
+        f'mode = ["{mode}"]',
+    )
+    p, folder = approved(tmp_path, exp, CASES.split('[[case]]\nid = "ferry"')[0])
+    start(p, "E0001")
+    (row,) = results(folder)
+    assert row["data"] == data
+    assert (row["error"] or "").startswith(error or "")
+    assert (row["error"] is None) is (error is None)
+    assert (next(folder.glob("outputs/*/*/*")) / "attempts").read_text() == tries  # 1 + retries at most
+
+
+def test_ac26_a_prompt_client_that_cannot_be_built_stops_the_run(tmp_path: Path) -> None:
+    from hone_select import ConfigError
+
+    exp = experiment(
+        'kind = "prompt"\nclient = "fake_client:text"\nprompt = "hi"', 'model = ["unknown-model"]'
+    )
+    p, _ = approved(
+        tmp_path, exp.replace('registry = ["subjects"]\n', ""), CASES.split('[[case]]\nid = "ferry"')[0]
+    )
+    with pytest.raises(ConfigError, match="could not be built for 'unknown-model'"):
+        start(p, "E0001")
+    assert p.status("E0001")["status"] == "stopped"
+
+
+SECRET = "sk-test" + "PLANTED0123456789"
+LEAKY = """
+import json, os, sys
+json.loads(sys.stdin.read())
+print("key is", os.environ["API_KEY"], file=sys.stderr)
+print(json.dumps({"data": {"key_length": len(os.environ["API_KEY"])}}))
+"""
+
+
+@pytest.mark.parametrize("form", ["literal", "variable"])
+def test_ac26_secrets_stay_out_of_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, form: str) -> None:
+    from hone_select.dashboard import make_server
+    from hone_select.experiments.web import detail
+
+    monkeypatch.setenv("HONE_TEST_SECRET", SECRET)
+    value = SECRET if form == "literal" else "$HONE_TEST_SECRET"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "leaky.py").write_text(LEAKY)
+    exp = experiment(
+        f'kind = "command"\ncommand = ["python3", "{{root}}/scripts/leaky.py"]\n'
+        f'env = {{ API_KEY = "{value}" }}',
+        'model = ["m"]',
+    )
+    p, folder = approved(tmp_path, exp, CASES.split('[[case]]\nid = "ferry"')[0])
+    start(p, "E0001")
+    (row,) = results(folder)
+    assert row["data"] == {"key_length": len(SECRET)}  # the subject got the real value
+    assert "***" in row["log"]
+    written = [q for q in folder.rglob("*") if q.is_file() and q.name != "experiment.toml"]
+    assert all(SECRET.encode() not in q.read_bytes() for q in written)
+    assert SECRET.encode() not in (tmp_path / ".hone" / "select" / "spans.db").read_bytes()
+    assert SECRET not in json.dumps(detail(p, "E0001"))
+    if form == "variable":
+        assert SECRET not in (folder / "experiment.toml").read_text()
+    make_server(tmp_path / ".hone" / "select" / "spans.db", port=0, project=tmp_path).server_close()

@@ -99,10 +99,21 @@ order = "model"                   # every sample of one model before the next (f
 
 Every sample records its time, peak memory, exit code (commands), the files it produced and its log. A
 failure (an exception, a non-zero exit, a timeout, output that is not JSON) is a result: the sample is
-rejected by the implicit `ran_ok` gate and counted in its setup's error and pass rates. `timeout`,
-`retries` (for `TransientError`, exit code 75, or any prompt-client error), `wrap` (for example
-`["scripts/gpu-lock.sh"]`), `env` and `keep_files` (`all`, `small`, `none`) are options of `[generate]`.
-Python subjects and commands run from the project root; python subjects run in their own process.
+rejected by the implicit `ran_ok` gate and counted in its setup's error and pass rates. A configuration
+mistake is different: a prompt `client` that cannot be built stops the run with a `ConfigError`.
+Options of `[generate]`: `timeout`; `retries`, for transient failures only (a python or prompt subject
+raises `hone_select.experiments.TransientError`, a command exits with code 75); `wrap` (for example
+`["scripts/gpu-lock.sh"]`); `env`; `keep_files` (`all`, `small`, `none`). Python subjects and commands run
+from the project root; python subjects run in their own process.
+
+**Secrets:** name them in `env` with `$VAR` (`env = { API_KEY = "$AVALAI_API_KEY" }`): the subject gets the
+value from your environment and the definition never contains it. Logs and errors are scrubbed of
+anything that looks like a key, and the dashboard shows the definition with the values of secret-named
+keys as `***`.
+
+**Cost** is what a subject reports (`cost_usd` in a command's reply, a `Candidate`'s meta, or a prompt
+client's usage). A sample that reports none has an unknown cost (`null`), never $0; money budgets count the
+known costs.
 
 ### Cases
 
@@ -186,6 +197,9 @@ commands), **Approve / Deny** with a note while it is proposed, its reviews, res
 factor and baseline, and every sample with its output, files (images, audio and video play inline) and
 log; and **Rate** for each human criterion, one output at a time, blind to the setup. After rating, run
 `hone-select experiments report E0001` to include the ratings in the results.
+
+One run at a time: `start` refuses an experiment that is running (stop it first) or completed (run
+`report` to recompute its results). A run that crashed or was killed shows as stopped, and `start` resumes it.
 
 A plan is approved for one definition: editing `experiment.toml`, `cases/`, `prompts/` or `scripts/` makes
 the experiment a draft again, and it needs a new plan and a new approval before it can start.

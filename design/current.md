@@ -679,7 +679,10 @@ writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `re
 - **Subjects:** `prompt` (a `TextClient` from a `module:factory`), `python` (`function(case, setup, ctx)` in
   its own interpreter), `command` (any program, placeholders, JSON on stdin, `wait4` peak memory). A
   failure is a result; the implicit gate `ran_ok` rejects it.
-- **Running:** samples in `run.order`, skipping done ones (resume), stopping at `STOP` or the budget; then one
+- **Secrets and costs:** `env` values may be `$VAR` references; logs, errors and the served definition are
+  scrubbed (secret-named keys are `***`); an unreported cost is `None`, never 0.
+- **Running:** one run at a time (a live run or a completed experiment refuses `start`); samples in
+  `run.order`, skipping done ones (resume), stopping at `STOP` or the budget; then one
   selection per case (`Engine.select`) with the criteria (`measure` normalized over the experiment, human
   criteria excluded), recorded in `.hone/select/spans.db` of the project.
 - **Results:** per setup, per factor level and against each baseline: mean total with a 95 % bootstrap

@@ -127,7 +127,17 @@ def start(
 ) -> dict[str, Any]:
     """Run an approved experiment (or resume a stopped one) to the end; returns its status."""
     state = project.status(eid)
-    if state["status"] not in ("approved", "stopped", "running", "completed"):
+    if state["status"] == "running":  # a live process: two runs would write the same files
+        raise HoneSelectError(
+            f"{eid} is already running (pid {state['run']['pid']}); stop it first: "
+            f"hone-select experiments stop {eid}"
+        )
+    if state["status"] == "completed":
+        raise HoneSelectError(
+            f"{eid} is completed; `hone-select experiments report {eid}` recomputes the results, "
+            "and a changed definition needs a new plan and approval"
+        )
+    if state["status"] not in ("approved", "stopped"):
         raise HoneSelectError(
             f"{eid} is {state['status']}: only an approved experiment starts "
             "(plan it, then approve it in the dashboard or with `experiments approve`)"
@@ -167,7 +177,7 @@ def _generate(
     hook = subjects.import_object(spec.generate.after_group) if spec.generate.after_group else None
     group: Any = None
     for case, setup, k in cells(spec, cases):
-        sid, target = d.setup_id(setup), None
+        sid = d.setup_id(setup)
         target = folder / "outputs" / case["id"] / sid / f"s{k}" / "result.json"
         if target.is_file():
             continue
@@ -203,7 +213,7 @@ def _generate(
 def _over_budget(folder: Path, spec: d.ExperimentSpec) -> bool:
     done = [read_json(p) for p in folder.glob("outputs/*/*/*/result.json")]
     seconds = sum(r.get("measurements", {}).get("seconds", 0.0) for r in done)
-    money = sum(r.get("cost_usd", 0.0) or 0.0 for r in done)
+    money = sum(r["cost_usd"] for r in done if isinstance(r.get("cost_usd"), int | float))  # known costs only
     b = spec.budget
     return (b.seconds is not None and seconds >= b.seconds) or (
         b.money_usd is not None and money >= b.money_usd

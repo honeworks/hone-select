@@ -2,29 +2,24 @@
 
 `run_sample` runs one sample in its own folder and always returns a result dict: the data, the files
 produced, measurements (seconds, peak memory, exit code, output bytes), the log, or the error. A failure
-is a result, never an exception.
+is a result, never an exception; only a configuration mistake (a client that cannot be built) stops the run.
 """
 
 from __future__ import annotations
 
-import hashlib
 import importlib
 import json
-import os
-import subprocess
 import sys
 import tempfile
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import IO, Any, cast
+from typing import Any, cast
 
+from hone_select._records import scrub
 from hone_select.errors import ConfigError
+from hone_select.experiments import process
 from hone_select.experiments.definition import ExperimentSpec, GenerateSpec
-
-LOG_LIMIT = 64 * 1024
-TEMPFAIL = 75  # a command exits with 75 (EX_TEMPFAIL) to ask for a retry
 
 
 class TransientError(Exception):
@@ -96,7 +91,7 @@ def preview(spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], f
 def run_sample(
     spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], seed: int, where: Where
 ) -> dict[str, Any]:
-    """Run one sample (with retries) and describe what happened."""
+    """Run one sample (with retries of transient failures) and describe what happened."""
     workdir = where.workdir
     workdir.mkdir(parents=True, exist_ok=True)
     runner = {"prompt": _prompt, "python": _python, "command": _command}[spec.generate.kind]
@@ -107,9 +102,12 @@ def run_sample(
         out.setdefault("measurements", {})["seconds"] = round(time.monotonic() - start, 3)
         if not out.pop("transient", False) or attempt == spec.generate.retries:
             break
-    files = _files(workdir)
-    out["files"] = files
-    out["measurements"]["output_bytes"] = sum(f["size"] for f in files.values())
+    produced = process.files(workdir)
+    out["files"] = produced
+    out["measurements"]["output_bytes"] = sum(f["size"] for f in produced.values())
+    out.setdefault("cost_usd", None)
+    if out.get("error"):
+        out["error"] = str(scrub(out["error"]))
     return out
 
 
@@ -117,14 +115,9 @@ def pilot(
     spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], folder: Path, root: Path
 ) -> dict[str, Any]:
     """One real sample in a throw-away folder, to measure time and cost for the plan."""
-    out = run_sample(
-        spec, case, setup, spec.seed, Where(root, folder, Path(tempfile.mkdtemp(prefix="hone-pilot-")))
-    )
-    return {
-        "measurements": out["measurements"],
-        "cost_usd": out.get("cost_usd", 0.0),
-        "error": out.get("error"),
-    }
+    scratch = Path(tempfile.mkdtemp(prefix="hone-pilot-"))
+    out = run_sample(spec, case, setup, spec.seed, Where(root, folder, scratch))
+    return {"measurements": out["measurements"], "cost_usd": out["cost_usd"], "error": out.get("error")}
 
 
 # -- prompt ----------------------------------------------------------------------------------------
@@ -132,11 +125,16 @@ def pilot(
 _clients: dict[tuple[str, str], Any] = {}
 
 
-def _client(g: GenerateSpec, model: Any) -> Any:
+def client(g: GenerateSpec, model: Any) -> Any:
+    """The prompt subject's client for `model`, built once. A client that cannot be built is a
+    `ConfigError` that stops the run (not a per-sample failure)."""
     key = (str(g.client), str(model))
     if key not in _clients:
         factory: Callable[..., Any] = import_object(str(g.client))
-        _clients[key] = factory(model, **g.client_args) if model is not None else factory(**g.client_args)
+        try:
+            _clients[key] = factory(model, **g.client_args) if model is not None else factory(**g.client_args)
+        except Exception as e:  # a factory that rejects its arguments is a configuration mistake
+            raise ConfigError(f"[generate] client {g.client!r} could not be built for {model!r}: {e}") from e
     return _clients[key]
 
 
@@ -160,19 +158,22 @@ def _prompt(
     params = {
         k: setup[k] for k in (g.params if g.params is not None else setup) if k not in ("model", "prompt")
     }
+    model_client = client(g, setup.get("model"))  # outside the try: a bad client stops the run
     try:
-        result = _client(g, setup.get("model")).complete(messages, seed=seed, **params)
-    except Exception as e:  # a model call that fails is a result; retries apply
-        return {"error": f"{type(e).__name__}: {e}", "transient": True}
+        result = model_client.complete(messages, seed=seed, **params)
+    except TransientError as e:
+        return {"error": f"TransientError: {e}", "transient": True}
+    except Exception as e:  # a model call that fails is a result
+        return {"error": f"{type(e).__name__}: {e}"}
     text, error = getattr(result, "text", str(result)), getattr(result, "error", None)
     usage = dict(getattr(result, "usage", {}) or {})
     out: dict[str, Any] = {
         "data": text,
         "error": error,
         "log": "",
-        "cost_usd": float(usage.get("cost_usd", 0.0)),
+        "cost_usd": process.cost(usage.get("cost_usd")),
     }
-    out["measurements"] = {k: v for k, v in usage.items() if isinstance(v, int | float)}
+    out["measurements"] = {k: v for k, v in usage.items() if isinstance(v, int | float) and k != "cost_usd"}
     if g.output == "json" and error is None:
         out["data"], out["error"] = _json(getattr(result, "parsed", None), text)
     return out
@@ -195,11 +196,11 @@ def _python(
 ) -> dict[str, Any]:
     """Run the function in its own interpreter (hone_select.experiments._child): killable on timeout, its own
     peak memory, and a crash cannot take the experiment down."""
-    result = where.workdir.parent / "subject.json"
+    g, result = spec.generate, where.workdir.parent / "subject.json"
     result.unlink(missing_ok=True)
     payload = json.dumps(
         {
-            "function": spec.generate.function,
+            "function": g.function,
             "case": case,
             "setup": setup,
             "seed": seed,
@@ -208,30 +209,20 @@ def _python(
             "paths": [str(where.root), str(where.folder / "scripts")],
         }
     )
-    argv = [*spec.generate.wrap, sys.executable, "-m", "hone_select.experiments._child"]
-    env = {**os.environ, **spec.generate.env}
+    argv = [*g.wrap, sys.executable, "-m", "hone_select.experiments._child"]
     try:
-        code, stdout, stderr, rss = _spawn(argv, payload, env, where.root, spec.generate.timeout)
+        done = process.run(argv, payload, process.environment(g.env), where.root, g.timeout)
     except OSError as e:
         return {"error": f"cannot start the subject process: {e}", "measurements": {}}
-    log = (stdout + ("\n--- stderr ---\n" + stderr if stderr else ""))[-LOG_LIMIT:]
-    if code is None:
-        return {
-            "error": f"timeout after {spec.generate.timeout:g} s",
-            "log": log,
-            "measurements": {"peak_memory_mb": rss},
-        }
-    if not result.is_file():
-        return {
-            "error": f"the subject process died (exit {code}): {stderr.strip()[-300:]}",
-            "log": log,
-            "measurements": {"peak_memory_mb": rss},
-        }
-    out: dict[str, Any] = json.loads(result.read_text())
-    result.unlink()
-    out["log"] = log
-    out["measurements"] = {**out.get("measurements", {}), "peak_memory_mb": rss}
-    return out
+    base: dict[str, Any] = {"log": done.log(), "measurements": {"peak_memory_mb": done.peak_memory_mb}}
+    if done.code is None:
+        return base | {"error": f"timeout after {g.timeout:g} s"}
+    try:
+        out: dict[str, Any] = json.loads(result.read_text())
+        result.unlink()
+    except (OSError, ValueError):  # no result, or half a result: the process died while writing it
+        return base | {"error": f"the subject process died (exit {done.code}): {done.tail()}"}
+    return out | {"log": base["log"], "measurements": {**out.get("measurements", {}), **base["measurements"]}}
 
 
 # -- command ---------------------------------------------------------------------------------------
@@ -240,7 +231,7 @@ def _python(
 def _command(
     spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], seed: int, where: Where
 ) -> dict[str, Any]:
-    g, workdir, root = spec.generate, where.workdir, where.root
+    g = spec.generate
     values = placeholders(case, setup, where, seed)
     argv = [*g.wrap, *(a.format_map(values) for a in g.command or [])]
     payload = json.dumps(
@@ -248,105 +239,28 @@ def _command(
             "case": {"id": case["id"], **case["fields"], "files": case["files"]},
             "setup": setup,
             "seed": seed,
-            "workdir": str(workdir),
+            "workdir": str(where.workdir),
         }
     )
-    env = {**os.environ, **g.env, "HONE_WORKDIR": str(workdir), "HONE_SEED": str(seed)}
+    env = process.environment(g.env, HONE_WORKDIR=str(where.workdir), HONE_SEED=str(seed))
     try:
-        code, stdout, stderr, rss = _spawn(argv, payload, env, root, g.timeout)
+        done = process.run(argv, payload, env, where.root, g.timeout)
     except OSError as e:
         return {"error": f"cannot run {argv[0]!r}: {e}", "measurements": {}}
-    log = (stdout + ("\n--- stderr ---\n" + stderr if stderr else ""))[-LOG_LIMIT:]
     out: dict[str, Any] = {
         "data": None,
         "error": None,
-        "log": log,
-        "measurements": {"exit_code": code, "peak_memory_mb": rss},
+        "log": done.log(),
+        "measurements": {"exit_code": done.code, "peak_memory_mb": done.peak_memory_mb},
     }
-    reply = _stdout_json(stdout)
+    reply = process.stdout_json(done.stdout)
     if reply is not None:
         out["data"] = reply.get("data")
         out["measurements"] |= dict(reply.get("measurements", {}))
-        out["cost_usd"] = float(reply.get("cost_usd", 0.0))
-    if code is None:
+        out["cost_usd"] = process.cost(reply.get("cost_usd"))
+    if done.code is None:
         out["error"] = f"timeout after {g.timeout:g} s"
-    elif code != 0:
-        out["error"] = f"exit code {code}: {stderr.strip()[-300:]}"
-        out["transient"] = code == TEMPFAIL
-    return out
-
-
-def _stdout_json(stdout: str) -> dict[str, Any] | None:
-    lines = [ln for ln in stdout.strip().splitlines() if ln.strip()]
-    if not lines:
-        return None
-    try:
-        value = json.loads(lines[-1])
-    except ValueError:
-        return None
-    return cast(dict[str, Any], value) if isinstance(value, dict) else None
-
-
-def _spawn(
-    argv: list[str], payload: str, env: dict[str, str], cwd: Path, timeout: float
-) -> tuple[int | None, str, str, float]:
-    """Run a process; (exit code or None on timeout, stdout, stderr, its peak memory in MB) via wait4."""
-    proc = subprocess.Popen(  # noqa: S603 - the command of an experiment a person approved
-        argv,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    chunks: dict[str, str] = {}
-
-    def read(name: str, stream: IO[str] | None) -> None:
-        chunks[name] = stream.read() if stream is not None else ""
-
-    readers = [
-        threading.Thread(target=read, args=(n, s), daemon=True)
-        for n, s in (("out", proc.stdout), ("err", proc.stderr))
-    ]
-    for r in readers:
-        r.start()
-    try:
-        if proc.stdin is not None:
-            proc.stdin.write(payload)
-            proc.stdin.close()
-    except BrokenPipeError:
-        pass
-    code, rss = _wait(proc, timeout)
-    for r in readers:
-        r.join(5)
-    return code, chunks.get("out", ""), chunks.get("err", ""), rss
-
-
-def _wait(proc: subprocess.Popen[str], timeout: float) -> tuple[int | None, float]:
-    """Reap the process with wait4 (its own peak memory); kill it at the timeout (exit code None)."""
-    deadline = time.monotonic() + timeout
-    while True:
-        pid, status, usage = os.wait4(proc.pid, os.WNOHANG)
-        if pid:
-            code: int | None = os.waitstatus_to_exitcode(status)
-            break
-        if time.monotonic() > deadline:
-            proc.kill()
-            _, _, usage = os.wait4(proc.pid, 0)
-            code = None
-            break
-        time.sleep(0.02)
-    proc.returncode = 0  # reaped by wait4; keeps Popen from waiting again
-    return code, round(usage.ru_maxrss / 1024, 1)
-
-
-def _files(workdir: Path) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for p in sorted(workdir.rglob("*")):
-        if p.is_file():
-            out[str(p.relative_to(workdir))] = {
-                "size": p.stat().st_size,
-                "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-            }
+    elif done.code != 0:
+        out["error"] = f"exit code {done.code}: {done.tail()}"
+        out["transient"] = done.code == process.TEMPFAIL
     return out

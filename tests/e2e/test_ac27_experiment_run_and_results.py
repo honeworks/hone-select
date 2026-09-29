@@ -131,3 +131,81 @@ def test_ac27_judge_agreement_is_reported(tmp_path: Path) -> None:
     start(p, "E0001")
     res = json.loads((folder / "results" / "results.json").read_text())
     assert res["agreement"]["length vs length_again"] > 0
+
+
+NONE_SUBJECTS = """
+from hone_select import Candidate, scorer
+
+
+def uneven(case, setup, ctx):
+    if setup["model"] == "broken":
+        raise RuntimeError("always fails")
+    measurements = {"words": 5} if setup["model"] == "measured" else {}
+    return Candidate.of(f"{case['id']} {setup['model']}", meta={"measurements": measurements})
+
+
+@scorer("picky")
+def picky(c):
+    if "keeper measured" in c.data:
+        raise ValueError("cannot judge this one")
+    return 0.5
+"""
+
+
+def test_ac27_missing_scores_stay_missing(tmp_path: Path) -> None:
+    (tmp_path / "uneven.py").write_text(NONE_SUBJECTS)
+    exp = (
+        'title = "t"\nregistry = ["uneven"]\n[generate]\nkind = "python"\nfunction = "uneven:uneven"\n'
+        '[factors]\nmodel = ["measured", "plain", "broken"]\n[[baseline]]\nname = "b"\nmodel = "plain"\n'
+        '[criteria]\nscorers = ["picky"]\nmeasure = { words = "higher" }\n'
+    )
+    p, folder = approved(tmp_path, exp)
+    start(p, "E0001")
+    res = json.loads((folder / "results" / "results.json").read_text())
+    broken = d.setup_id({"model": "broken"})
+    assert res["setups"][broken]["total"]["mean"] is None  # every sample failed: unknown, not 0
+    assert res["setups"][broken]["errors"] == 2
+    assert res["setups"][broken]["pass_rate"] == 0.0
+    assert res["best"] != broken
+    assert res["ranking"][-1] == broken
+    plain = res["setups"][d.setup_id({"model": "plain"})]
+    assert plain["criteria"]["words"] is None  # no measurement: None, never counted as 0
+    assert plain["measurements"].get("words") is None
+    selection = json.loads((folder / "outputs" / "keeper" / "selection.json").read_text())
+    failed = next(s for sid, s in selection["samples"].items() if "measured" in sid)
+    assert failed["scores"]["picky"]["value"] is None
+    assert "cannot judge" in failed["scores"]["picky"]["error"]
+    assert res["setups"][broken]["cost_usd"] is None  # no subject reported a cost: unknown, not $0
+
+
+def test_ac27_a_crash_is_resumed(tmp_path: Path) -> None:
+    p, _ = approved(tmp_path)
+    count = {"n": 0}
+
+    def crash_after_three(_: dict) -> None:
+        count["n"] += 1
+        if count["n"] == 3:
+            raise RuntimeError("the machine fell over")
+
+    with pytest.raises(RuntimeError):
+        start(p, "E0001", on_sample=crash_after_three)
+    assert p.status("E0001")["status"] == "stopped"
+    assert start(p, "E0001")["status"] == "completed"
+    assert p.status("E0001")["done"] == 24
+
+
+def test_ac27_one_run_at_a_time(tmp_path: Path) -> None:
+    import os
+
+    from hone_select import HoneSelectError
+
+    p, folder = approved(tmp_path)
+    run = {"state": "running", "pid": os.getpid(), "definition_hash": d.definition_hash(folder)}
+    (folder / "run.json").write_text(json.dumps(run))
+    with pytest.raises(HoneSelectError, match=f"already running \\(pid {os.getpid()}\\)"):
+        start(p, "E0001")
+    (folder / "run.json").write_text(json.dumps(run | {"pid": 2**22 + 12345}))  # a pid that is not alive
+    assert p.status("E0001")["status"] == "stopped"
+    assert start(p, "E0001")["status"] == "completed"
+    with pytest.raises(HoneSelectError, match="is completed"):
+        start(p, "E0001")

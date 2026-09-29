@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
+from hone_select._records import scrub
+from hone_select.engine import SECRET_KEY
 from hone_select.errors import HoneSelectError
 from hone_select.experiments import definition as d
 from hone_select.experiments import ratings, results
@@ -34,13 +37,26 @@ def _error(message: str, status: int = 400) -> Reply:
     return _json({"error": message}, status)
 
 
+PAIR = re.compile(r"""(?P<key>[A-Za-z0-9_.-]+)(?P<eq>\s*=\s*)(?P<value>"[^"]*"|'[^']*')""")
+
+
+def redacted(toml_text: str) -> str:
+    """The definition as served: values of secret-named keys (`api_key`, `token`, `password`, ...) are ***,
+    and anything that looks like a key is scrubbed. Name secrets with `$VAR` in `env` instead."""
+
+    def hide(m: re.Match[str]) -> str:
+        return f'{m["key"]}{m["eq"]}"***"' if SECRET_KEY.search(m["key"]) else m[0]
+
+    return str(scrub(PAIR.sub(hide, toml_text)))
+
+
 def detail(project: Project, eid: str) -> dict[str, Any]:
     folder = project.path(eid)
     spec = d.load(folder)
     plan = read_json(folder / "plan.json")
     return {
         **project.status(eid),
-        "definition": (folder / d.DEFINITION).read_text(),
+        "definition": redacted((folder / d.DEFINITION).read_text()),
         "factors": spec.factors,
         "criteria": spec.criteria.model_dump(),
         "human": {n: h.model_dump() for n, h in spec.human_scorers().items()},
@@ -105,13 +121,15 @@ def post(project: Project, path: str, body: bytes) -> Reply:
         return _error(str(e))
 
 
-def same_origin(headers: Any, host: str) -> bool:
-    """A write must come from the dashboard page itself: its custom header (which a cross-site form cannot
-    send without a preflight this server never allows) and, when present, a matching Origin."""
-    if headers.get("X-Hone-Dashboard") != "1":
+def same_origin(headers: Any, allowed: set[str]) -> bool:
+    """A write must come from the dashboard page itself: to one of the server's own addresses (`allowed`
+    Host values; a DNS-rebinding page is refused), with the page's custom header (a cross-site form cannot
+    send it without a preflight this server never allows) and, when present, an Origin on the same
+    address."""
+    if headers.get("Host", "") not in allowed or headers.get("X-Hone-Dashboard") != "1":
         return False
     origin = headers.get("Origin")
-    return origin is None or origin in (f"http://{host}", f"https://{host}")
+    return origin is None or origin.removeprefix("http://") in allowed
 
 
 def has_experiments(root: Path) -> bool:

@@ -278,12 +278,20 @@ def make_server(
             self.end_headers()
             self.wfile.write(body)
 
+        def _allowed(self) -> set[str]:
+            """The Host values this server answers: its own address (a DNS-rebinding page sends its own
+            host name and is refused)."""
+            port = cast(tuple[str, int], self.server.server_address)[1]
+            return {f"{h}:{port}" for h in ("127.0.0.1", "localhost", "[::1]", host)}
+
         def do_GET(self) -> None:
+            if self.headers.get("Host", "") not in self._allowed():
+                self._send((403, "application/json", b'{"error": "unknown Host"}'))
+                return
             self._send(answer(self.path.split("?", 1)[0]))
 
         def do_POST(self) -> None:
-            host_header = self.headers.get("Host", "")
-            if root is None or not web.same_origin(self.headers, host_header):
+            if root is None or not web.same_origin(self.headers, self._allowed()):
                 self._send(
                     (403, "application/json", b'{"error": "writes come from the dashboard page only"}')
                 )

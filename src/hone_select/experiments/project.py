@@ -116,10 +116,10 @@ class Project:
         if pilot:
             sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
             plan["pilot"] = sample
-            per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd", 0.0)
+            per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
             plan["estimate"] = {
                 "seconds": round(per_s * outputs, 1),
-                "money_usd": round(per_usd * outputs, 4),
+                "money_usd": round(per_usd * outputs, 4) if per_usd is not None else None,  # unknown, not $0
                 "from": "one pilot sample (generation only; judges not included)",
             }
         write_json(folder / "plan.json", plan)

@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from hone_select.experiments.process import cost
 from hone_select.experiments.subjects import Ctx, TransientError, import_object
 from hone_select.types import Candidate
 
@@ -32,7 +33,7 @@ def main() -> int:
         out = {
             "data": data,
             "measurements": dict(meta.get("measurements", {})),
-            "cost_usd": float(meta.get("cost_usd", 0.0)),
+            "cost_usd": cost(meta.get("cost_usd")),
             "error": None,
         }
     except TransientError as e:

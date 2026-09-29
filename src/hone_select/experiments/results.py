@@ -41,7 +41,7 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
                     "error": r.get("error"),
                     "scores": {k: v.get("value") for k, v in s.get("scores", {}).items()},
                     "measurements": r.get("measurements", {}),
-                    "cost_usd": r.get("cost_usd", 0.0) or 0.0,
+                    "cost_usd": r.get("cost_usd"),
                     "human": human.get(r["sample_id"], {}),
                 }
             )
@@ -91,8 +91,14 @@ def _stats(rs: Sequence[dict[str, Any]], spec: d.ExperimentSpec, seed: int) -> d
             m: _round(_mean(_case_means(rs, lambda r, m=m: r["measurements"].get(m))))
             for m in {k for r in rs for k in r["measurements"]}
         },
-        "cost_usd": _round(sum(r["cost_usd"] for r in rs)),
+        "cost_usd": _known_sum(r["cost_usd"] for r in rs),
     }
+
+
+def _known_sum(values: Any) -> float | None:
+    """The sum of the known values; None when none is known (an unknown cost is not $0)."""
+    known = [v for v in values if isinstance(v, int | float)]
+    return _round(sum(known)) if known else None
 
 
 def _mean(by_case: dict[str, float]) -> float | None:

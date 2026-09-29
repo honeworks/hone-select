@@ -163,3 +163,25 @@ def test_ac29_dashboard_needs_a_store_or_experiments(tmp_path: Path) -> None:
         make_server(tmp_path / "none.db", port=0, project=tmp_path)
     project(tmp_path)
     make_server(tmp_path / "none.db", port=0, project=tmp_path).server_close()  # experiments are enough
+
+
+def test_ac29_partial_ratings_are_incomplete(tmp_path: Path) -> None:
+    p, folder = approved(tmp_path, HUMAN)
+    start(p, "E0001")
+    spec = d.load(folder)
+    rated = [r for r in ratings.rateable(folder) if "large" in r["sample_id"]][:1]
+    ratings.add(folder, spec, rated[0]["sample_id"], "keep_reading", 5)
+    res = report(folder, spec, json.loads((folder / "plan.json").read_text()))
+    large = res["factors"]["model"]["large"]["human"]["keep_reading"]
+    assert large == {"mean": 1.0, "rated": 1, "complete": False}  # min_ratings = 2
+    assert res["factors"]["model"]["small"]["human"]["keep_reading"]["mean"] is None
+
+
+def test_ac29_a_foreign_host_is_refused(served: tuple[str, Path]) -> None:
+    base, _ = served
+    port = base.rsplit(":", 1)[1]
+    rebinding = {"Host": f"attacker.example:{port}"}
+    assert call(base + "/api/experiments", headers=rebinding)[0] == 403
+    status, _ = call(base + "/api/experiments/E0002/review", {"decision": "approve"}, {**PAGE, **rebinding})
+    assert status == 403
+    assert call(base + "/api/experiments", headers={"Host": f"localhost:{port}"})[0] == 200
