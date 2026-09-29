@@ -157,7 +157,7 @@ def could_not(plan: Mapping[str, Any]) -> list[str]:
         for n in c["needs"]:
             per.setdefault(str(c["model"]), {}).setdefault(n, set()).add(str(c["case"]))
     return [
-        f"- `{m}` could not do: "
+        f"`{m}` could not do: "
         + ", ".join(f"{n} ({len(cs)} of {len(plan['cases'])} cases)" for n, cs in needs.items())
         for m, needs in per.items()
     ]

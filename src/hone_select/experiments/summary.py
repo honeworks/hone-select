@@ -90,7 +90,7 @@ def _baselines(res: dict[str, Any]) -> list[str]:
 
 def _models(res: dict[str, Any]) -> list[str]:
     could_not: list[str] = res.get("could_not") or []
-    lines = ["", "## What each model could not do", "", *could_not] if could_not else []
+    lines = ["", "## What each model could not do", "", *(f"- {c}" for c in could_not)] if could_not else []
     models: dict[str, dict[str, Any]] = res.get("models") or {}
     marks = [
         f"- `{m}`: non-commercial ({info.get('license') or 'license not declared'})"
