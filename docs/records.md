@@ -17,8 +17,10 @@ one row per span, in SQLite WAL mode so several processes can write at once.
 
 Values over 64 KiB go to a `blobs` table by sha256. Anything that looks like an API key or bearer token is
 replaced with `***`, and so is every configuration value whose key is named like a key, token, secret,
-password, authorization or credential (for example `api_key` in a `[judges.*]` section). With `[record] capture_content = false` (or `HONE_CAPTURE_CONTENT=0`), candidate text,
-reasons and error messages are stored as hashes only.
+password, authorization or credential (for example `api_key` in a `[judges.*]` section; a harmless name
+such as `sort_key` is redacted too, on purpose). With `[record] capture_content = false` (or
+`HONE_CAPTURE_CONTENT=0`), candidate text, reasons, error messages, the task and the prompt text in the
+configuration (`criteria`, `anchors`) are stored as hashes only.
 
 Other sinks: `sink = "jsonl"` (one JSON span per line) or `"none"`; or pass any `RecordSink`
 (`emit`, `flush`, `close`) as `Engine(..., sink=...)`, such as `hone_select.testing.MemorySink`:

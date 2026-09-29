@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -212,6 +213,40 @@ def test_ac24_secrets_never_recorded_and_prompt_text_is_content(
         assert b"PLANTED-CRITERIA" not in raw
 
 
+@pytest.mark.parametrize(
+    ("toml", "path", "readable"),
+    [
+        ('password = "planted-a"', ["password"], None),
+        ('client_secret = "planted-a"', ["client_secret"], None),
+        ('Authorization = "planted-a"', ["Authorization"], None),
+        (
+            'headers = [{ name = "x-app", token = "planted-a" }]',
+            ["headers", 0, "token"],
+            ["headers", 0, "name"],
+        ),
+    ],
+)
+def test_ac24_every_secret_key_family_is_redacted(
+    toml: str, path: list[str | int], readable: list[str | int] | None, hone_home: Path
+) -> None:
+    config = (
+        f'[judges.remote]\nclient = "never.loaded:factory"\nmodel = "judge-7b"\n{toml}\n[generate]\nn = 1\n'
+    )
+    run_id = Engine(config, registry=[write]).run("a song").run_id
+    assert b"planted-a" not in store(hone_home).read_bytes()
+    remote = run_detail(store(hone_home), run_id)["config"]["judges"]["remote"]
+    value: Any = remote
+    for step in path:
+        value = value[step]
+    assert value == "***"
+    assert remote["model"] == "judge-7b"  # sibling keys stay readable
+    if readable is not None:
+        value = remote
+        for step in readable:
+            value = value[step]
+        assert value == "x-app"
+
+
 def test_ac24_secrets_are_not_served(hone_home: Path) -> None:
     from hone_select.testing import FakeDecisionClient
 
@@ -266,6 +301,20 @@ def test_ac24_failures_show_as_they_happened(hone_home: Path) -> None:
 @generator()
 def broken(task, v):
     raise RuntimeError("the model is down")
+
+
+@generator()
+def flaky(task, v):
+    if v["index"] % 2:
+        raise RuntimeError("timeout")
+    return f"answer {v['index']}"
+
+
+def test_ac24_candidate_count_ignores_failed_generations(hone_home: Path) -> None:
+    run_id = Engine("[generate]\nn = 4\n", registry=[flaky]).run("t").run_id
+    summary = next(r for r in list_runs(store(hone_home)) if r["run_id"] == run_id)
+    assert summary["candidate_count"] == 2  # indexes 0 and 2; 1 and 3 failed
+    assert len(run_detail(store(hone_home), run_id)["candidates"]) == 2
 
 
 def test_ac24_a_run_without_candidates(hone_home: Path) -> None:
