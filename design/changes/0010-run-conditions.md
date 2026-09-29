@@ -3,7 +3,7 @@
 ## Status
 
 `proposed` (2026-09-29). Designed together with hone-models change
-[0015 machine state](https://github.com/honeworks/hone-models/blob/main/design/changes/0015-machine-state.md),
+[0016 machine state](https://github.com/honeworks/hone-models/blob/main/design/changes/0016-machine-state.md),
 which provides the machine probe; §6 uses its interface exactly. The dashboard parts (§12) follow the
 layout of design/decisions.md D-012.
 
@@ -229,12 +229,12 @@ simply left out when they cannot.
 ### 6. The port and the hone-models adapter
 
 hone-select owns a new Protocol in `hone_select.ports` (additive; `PORTS_VERSION` stays `"1"`). Its shape
-is the one hone-models 0015 implements (`hone_models.machine.Machine`); hone-select reads every key as
+is the one hone-models 0016 implements (`hone_models.machine.Machine`); hone-select reads every key as
 optional, and an unknown value is `None`, never 0.
 
 ```python
 class MachineProbe(Protocol):
-    """The machine's model state (design change 0010), provided by hone-models 0015; any object fits."""
+    """The machine's model state (design change 0010), provided by hone-models 0016; any object fits."""
 
     def snapshot(self) -> Mapping[str, Any]: ...
     # {"time": "…",
@@ -275,7 +275,7 @@ How hone-select reads the result:
 
 Resolution, like the judges: `probe = "<name>"` resolves by exact name in the entry-point group
 `hone.machine_probes`, and the factory is called with no arguments. The pairing is the one decision clients
-use (hone-models 0015): hone-models registers `hone.machine_probes` / `hone_models` →
+use (hone-models 0016): hone-models registers `hone.machine_probes` / `hone_models` →
 `hone_models.machine:Machine`, and hone-select registers `"hone_models:machine" =
 "hone_select.adapters.hone_models:machine"`, which imports `hone_models` only when called, returns
 `Machine()`, and raises `ConfigError` ("install hone-select[models]") when it is missing. An unknown name is a
@@ -426,7 +426,7 @@ On the Experiments page (in the layout PR #6 lands):
   the `nvidia-smi` command (a small script on a temporary `PATH` printing scripted CSV, one that fails, one
   that is missing) and the clock and poll interval (tests use a fake clock and a 0-second poll, so a
   30-minute `wait_timeout` passes instantly).
-- **Model state:** `FakeMachineProbe` with scripted snapshots and `prepare` results in hone-models 0015's
+- **Model state:** `FakeMachineProbe` with scripted snapshots and `prepare` results in hone-models 0016's
   shape (a leftover model that `prepare` unloads, a `blocked_by` lease, an unload in `errors`, a server
   with `running: None`, `gpus: None`, a `missing` model, a partly offloaded model, a probe that raises).
 - **The lock:** a real `flock` on a file in `tmp_path` (it needs no GPU); a helper subprocess holds it to
@@ -504,4 +504,4 @@ On the Experiments page (in the layout PR #6 lands):
 9. **Cold first samples:** `prepare` never loads a model, so the first sample of each model group includes
    the model's load time. Mark it `cold` in its environment and still count it (proposed: its output is
    valid, only its time is not), leave cold samples out of the speed numbers only, or warm the model up
-   first (would need hone-models 0015's open question 5, `mk.machine.load`)?
+   first (would need hone-models 0016's open question 5, `mk.machine.load`)?
