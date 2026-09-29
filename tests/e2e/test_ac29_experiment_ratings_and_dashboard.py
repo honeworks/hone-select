@@ -237,11 +237,30 @@ def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
     try:
         page = urllib.request.urlopen(base + "/", timeout=10).read().decode()  # noqa: S310 - a local test server
         called = sorted(set(PAGE_CALL.findall(page)))
+        expected = {
+            "/api/info",
+            "/api/runs",
+            "/api/runs/${id}",
+            "/api/candidates",
+            "/api/experiments",
+            "/api/experiments/${eid}",
+            "/api/experiments/${eid}/rate/${criterion}",
+        }
+        assert expected <= set(called)  # every section of the page still calls its endpoint
+        assert any(c.startswith("/files/") for c in called)  # the samples panel reads result.json
+        for view in (
+            "showExperiments",
+            "showExperiment",
+            "showRuns",
+            "showRun",
+            "showCandidates",
+            "showRate",
+        ):
+            assert f"function {view}(" in page  # every view the router names is defined
         run_id = call(base + "/api/runs")[1][0]["run_id"]
         sample = call(base + "/api/experiments/E0001")[1]["samples"][0]["sample_id"]
         case, setup, k = sample.split("__")
         values = {"eid": "E0001", "criterion": "keep_reading", "id": run_id}
-        checked = []
         for template in called:
             if template.startswith("/files/"):
                 url = f"/files/E0001/outputs/{case}/{setup}/{k}/result.json"  # what the samples panel fetches
@@ -255,8 +274,6 @@ def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
                     url = PLACEHOLDER.sub(values[name], url, count=1)
             status, _ = call(base + url, raw=True)
             assert status == 200, (template, url)
-            checked.append(template)
     finally:
         srv.shutdown()
         srv.server_close()
-    assert len(checked) >= 7  # info, runs, a run, candidates, experiments, an experiment, rating, files
