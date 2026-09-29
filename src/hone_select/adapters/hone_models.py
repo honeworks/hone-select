@@ -59,8 +59,7 @@ def guides() -> ModelGuides:
 class _Guides:
     def __init__(self, hone_models: Any) -> None:
         self.mk = hone_models
-        errors = getattr(hone_models, "errors", None)
-        self.unknown: type[Exception] = getattr(errors, "ConfigError", LookupError)
+        self.unknown: type[Exception] = importlib.import_module("hone_models.errors").ConfigError
 
     def guide(self, model_id: str) -> Mapping[str, Any] | None:
         try:

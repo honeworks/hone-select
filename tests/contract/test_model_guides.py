@@ -90,6 +90,7 @@ def _hone_models(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     module.errors = errors  # type: ignore[attr-defined]
     module.guide = guide  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "hone_models", module)
+    monkeypatch.setitem(sys.modules, "hone_models.errors", errors)
     return module
 
 
