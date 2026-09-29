@@ -37,10 +37,9 @@ def _registry(spec: d.ExperimentSpec, root: Path) -> list[Any]:
 
 
 def _selection_config(spec: d.ExperimentSpec, root: Path) -> SelectionConfig:
-    scorers = [s for s in spec.criteria.scorers if s not in spec.human_scorers()] + list(
-        spec.criteria.measure
-    )
-    machine = {n: s for n, s in spec.scorers.items() if s.get("kind") != "human"}
+    person = spec.person_scorers()  # ratings and A/B are not part of the automatic total
+    scorers = [s for s in spec.criteria.scorers if s not in person] + list(spec.criteria.measure)
+    machine = {n: s for n, s in spec.scorers.items() if n not in person}
     return SelectionConfig.model_validate(
         {
             "judges": spec.judges,

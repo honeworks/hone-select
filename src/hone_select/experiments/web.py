@@ -5,9 +5,13 @@
     POST /api/experiments/<eid>/review            {"decision": "approved" | "denied", "note": ...}
     GET  /api/experiments/<eid>/rate/<criterion>  the next output to rate (blind to the setup)
     POST /api/experiments/<eid>/rate              {"sample_id", "criterion", "value"}
+    GET  /api/experiments/<eid>/ab/<criterion>    the next A/B pair (design change 0012), no setup names
+    GET  /api/experiments/<eid>/ab/<criterion>/<index>/<left|right>/<path>   a file of one side of a pair
+    POST /api/experiments/<eid>/ab                {"criterion", "index", "choice": "left" | "right" | "tie"}
+    POST /api/experiments/<eid>/ab/undo           {"criterion"}: remove the last pick
     GET  /files/<eid>/<path>                      a file under the experiment's cases/ or outputs/
 
-The only writes are reviews and ratings, in the experiment folder.
+The only writes are reviews, ratings and A/B picks, in the experiment folder.
 """
 
 from __future__ import annotations
@@ -22,8 +26,8 @@ from urllib.parse import urlsplit
 from hone_select._records import scrub
 from hone_select.engine import SECRET_KEY
 from hone_select.errors import HoneSelectError
+from hone_select.experiments import ab, ratings, results
 from hone_select.experiments import definition as d
-from hone_select.experiments import ratings, results
 from hone_select.experiments.project import Project, read_json
 
 Reply = tuple[int, str, bytes]
@@ -61,6 +65,7 @@ def detail(project: Project, eid: str) -> dict[str, Any]:
         "factors": spec.factors,
         "criteria": spec.criteria.model_dump(),
         "human": {n: h.model_dump() for n, h in spec.human_scorers().items()},
+        "ab": {n: c.model_dump() for n, c in spec.ab_scorers().items()},
         "plan": plan,
         "reviews": read_json(folder / "review.json", []),
         "samples": results.rows(folder, spec),
@@ -75,14 +80,28 @@ def get(project: Project, path: str) -> Reply:
             return _json(project.list())
         if len(parts) == 3 and parts[:2] == ["api", "experiments"]:
             return _json(detail(project, parts[2]))
-        if len(parts) == 5 and parts[3] == "rate":
-            folder = project.path(parts[2])
-            return _json(ratings.next_output(folder, d.load(folder), parts[4]))
+        if len(parts) >= 5 and parts[3] in ("rate", "ab"):
+            return _judge(project, parts)
         if parts[:1] == ["files"] and len(parts) >= 3:
             return _file(project, parts[1], "/".join(parts[2:]))
     except HoneSelectError as e:
         return _error(str(e), 404)
     return _error("not found", 404)
+
+
+def _judge(project: Project, parts: list[str]) -> Reply:
+    """What a person judges next: an output to rate, an A/B pair, or a file of one side of a pair."""
+    folder = project.path(parts[2])
+    spec = d.load(folder)
+    if len(parts) == 5:
+        judge = ratings.next_output if parts[3] == "rate" else ab.next_pair
+        return _json(judge(folder, spec, parts[4]))
+    if parts[3] != "ab" or len(parts) < 8 or not parts[5].isdigit():
+        return _error("not found", 404)
+    target = ab.file(folder, spec, parts[4], int(parts[5]), side=parts[6], relative="/".join(parts[7:]))
+    if target is None:
+        return _error("not found", 404)
+    return 200, mimetypes.guess_type(target.name)[0] or "application/octet-stream", target.read_bytes()
 
 
 def _file(project: Project, eid: str, relative: str) -> Reply:
@@ -97,10 +116,12 @@ def _file(project: Project, eid: str, relative: str) -> Reply:
 
 def post(project: Project, path: str, body: bytes) -> Reply:
     parts = [p for p in path.split("/") if p]
-    if len(parts) != 4 or parts[:2] != ["api", "experiments"] or parts[3] not in ("review", "rate"):
+    if parts[:2] != ["api", "experiments"] or parts[3:] not in (["review"], ["rate"], ["ab"], ["ab", "undo"]):
         return _error("not found", 404)
     try:
         data = json.loads(body or b"{}")
+        if parts[3] == "ab":
+            return _pick(project, parts, data)
         if parts[3] == "review":
             decision = {"approve": "approved", "deny": "denied"}.get(
                 data.get("decision"), data.get("decision")
@@ -120,6 +141,17 @@ def post(project: Project, path: str, body: bytes) -> Reply:
         return _json({"ok": True})
     except (HoneSelectError, KeyError, TypeError, ValueError) as e:
         return _error(str(e))
+
+
+def _pick(project: Project, parts: list[str], data: dict[str, Any]) -> Reply:
+    """An A/B pick, or the undo of the last one."""
+    folder = project.path(parts[2])
+    spec = d.load(folder)
+    if parts[4:] == ["undo"]:
+        ab.undo(folder, spec, str(data["criterion"]))
+    else:
+        ab.add(folder, spec, str(data["criterion"]), int(data["index"]), str(data["choice"]))
+    return _json({"ok": True})
 
 
 def host_ok(headers: Any, allowed: set[str] | None) -> bool:

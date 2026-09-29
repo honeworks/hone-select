@@ -90,6 +90,7 @@ class Project:
         """Validate, expand every cell, estimate, and write `plan.json` (status: proposed). `sources`: where
         the run-condition reading comes from (default: this machine)."""
         from hone_select.experiments import (  # noqa: PLC0415
+            ab,
             applicable,
             conditions,
             needs,
@@ -101,6 +102,7 @@ class Project:
         setups = d.setups(spec)
         src = sources or conditions.DEFAULT
         needs.check_definition(spec, cases, setups)
+        ab.check_definition(spec)
         selection.check_criteria(spec, self.root)
         aware = applicable.plan_parts(spec, cases, setups, folder)
         skip = applicable.skipped(aware)

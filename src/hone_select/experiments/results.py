@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from hone_select.experiments import applicable, ratings
+from hone_select.experiments import ab, ab_results, applicable, ratings
 from hone_select.experiments import definition as d
 from hone_select.experiments.outside import (
     EXCLUDED,
@@ -225,8 +225,10 @@ def compute(
 def report(
     folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any], *, include_outside: bool = False
 ) -> dict[str, Any]:
-    """Compute the results and write `results/results.json` and `results/summary.md`."""
+    """Compute the results and write `results/results.json` and `results/summary.md`. The first report
+    after the run also draws the A/B pairs (design change 0012)."""
     res = compute(folder, spec, plan, include_outside=include_outside)
+    res["ab"] = ab_results.section(folder, spec, ab.fixed(folder, spec, plan, res["ranking"]))
     write_json(folder / "results" / "results.json", res)
     (folder / "results" / "summary.md").write_text(summary(res))
     return res

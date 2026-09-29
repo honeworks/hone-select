@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from hone_select.experiments.ab_results import lines as ab_lines
 from hone_select.experiments.outside import conditions_line
 
 ASKED = " (asked differently)"
@@ -114,6 +115,7 @@ def summary(res: dict[str, Any]) -> str:
         *_setups(res),
         *_factors(res),
         *_baselines(res),
+        *ab_lines(res),
         *_models(res),
     ]
     return "\n".join(lines) + "\n"
