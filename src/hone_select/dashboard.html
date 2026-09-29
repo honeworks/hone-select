@@ -3,390 +3,572 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>hone-select runs</title>
+<title>hone-select</title>
 <style>
-  :root { --bg: #fff; --fg: #1d2330; --muted: #6b7280; --line: #e3e6ec; --head: #f5f6f8; --hi: #eef4ff;
-          --ok: #1a7f37; --bad: #c62828; --win: #fff6d6; --link: #2457c5; }
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6; --text: #0f172a; --muted: #64748b;
+    --border: #e4e7ec; --accent: #4f46e5; --accent-soft: #eef0ff; --accent-text: #ffffff;
+    --ok: #15803d; --ok-soft: #dcfce7; --warn: #b45309; --warn-soft: #fef3c7; --bad: #b91c1c; --bad-soft: #fee2e2;
+    --info: #0369a1; --info-soft: #e0f2fe; --bar: #c7cbf9; --bar-win: #4f46e5;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.07);
+    --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #14171c; --fg: #e3e6ec; --muted: #9aa3b2; --line: #2a2f38; --head: #1b1f26; --hi: #1d2a40;
-            --ok: #4cc26b; --bad: #ef6b6b; --win: #3a3314; --link: #7aa5ff; }
+    :root {
+      --bg: #0b0d12; --surface: #12151c; --surface-2: #191d27; --text: #e6e8ee; --muted: #8b95a7;
+      --border: #242a36; --accent: #8b93ff; --accent-soft: #1d2140; --accent-text: #0b0d12;
+      --ok: #4ade80; --ok-soft: #10281a; --warn: #fbbf24; --warn-soft: #2b2210; --bad: #f87171; --bad-soft: #2c1414;
+      --info: #38bdf8; --info-soft: #0c2230; --bar: #33397a; --bar-win: #8b93ff; --shadow: none;
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
-  header { display: flex; gap: 18px; align-items: baseline; padding: 12px 20px; border-bottom: 1px solid var(--line); }
-  header b { font-size: 16px; }
-  a { color: var(--link); text-decoration: none; cursor: pointer; }
-  main { padding: 16px 20px 60px; }
-  h2 { font-size: 16px; margin: 22px 0 8px; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body { font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  code, pre, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .app { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+  aside { background: var(--surface); border-right: 1px solid var(--border); padding: 18px 14px; position: sticky; top: 0; height: 100vh;
+          display: flex; flex-direction: column; gap: 4px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; padding: 4px 8px 16px; white-space: nowrap; }
+  .brand .dot { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #a855f7); }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); font-weight: 500; }
+  .nav a:hover { background: var(--surface-2); color: var(--text); }
+  .nav a.active { background: var(--accent-soft); color: var(--accent); }
+  .nav svg { width: 17px; height: 17px; flex: none; }
+  .source { margin-top: auto; font-size: 11.5px; color: var(--muted); padding: 8px; border-top: 1px solid var(--border); word-break: break-all; }
+  main { padding: 28px 36px 80px; max-width: 1400px; width: 100%; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .head h1 { font-size: 22px; line-height: 1.25; margin: 2px 0 4px; font-weight: 700; letter-spacing: -.01em; }
+  .head p { margin: 0; color: var(--muted); max-width: 820px; }
+  .crumbs { font-size: 12.5px; color: var(--muted); }
+  .crumbs a { color: var(--muted); } .crumbs a:hover { color: var(--accent); }
+  h2 { font-size: 15px; margin: 26px 0 10px; font-weight: 650; }
   .muted { color: var(--muted); }
-  .bar { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
-  input, select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px;
-                  background: var(--bg); color: var(--fg); }
-  .wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
-           white-space: nowrap; }
-  th { background: var(--head); position: sticky; top: 0; cursor: pointer; user-select: none; font-weight: 600; }
-  button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--head); color: var(--fg); cursor: pointer; }
-  textarea { font: inherit; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); padding: 6px; }
-  th input { width: 100%; min-width: 60px; margin-top: 3px; font-weight: normal; }
-  tbody tr:hover { background: var(--hi); }
-  tr.clickable { cursor: pointer; }
-  tr.win { background: var(--win); }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
-  pre { background: var(--head); padding: 10px; border-radius: 6px; overflow: auto; max-height: 360px;
-        white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-  .card { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
-  .card div:first-child { color: var(--muted); font-size: 12px; }
-  details { margin: 6px 0; }
-  .detail td { white-space: normal; background: var(--head); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .tile .label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .tile .value { font-size: 20px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+  .tile .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+          background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.info { background: var(--info-soft); color: var(--info); }
+  .pill.accent { background: var(--accent-soft); color: var(--accent); }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); font-size: 12px; margin: 1px 4px 1px 0; }
+  .chip b { font-weight: 600; }
+  .btn { font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+         color: var(--text); cursor: pointer; display: inline-block; }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--bad); }
+  .btn.small { padding: 3px 10px; font-size: 12.5px; }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+                            border-radius: 8px; padding: 7px 10px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .progress { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s; }
+  .callout { display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+             border-left: 3px solid var(--accent); margin-bottom: 4px; }
+  .callout.bad { border-left-color: var(--bad); } .callout.ok { border-left-color: var(--ok); } .callout.warn { border-left-color: var(--warn); }
+  .cmd { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-2); border-radius: 8px; padding: 4px 5px 4px 10px; max-width: 100%; }
+  .cmd code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .toolbar input[type=search] { width: 280px; }
+  .tablewrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; max-height: 70vh; box-shadow: var(--shadow); }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; }
+  th, td { padding: 9px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { position: sticky; top: 0; background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer;
+       user-select: none; z-index: 1; }
+  th:hover { color: var(--text); }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th .arrow { opacity: .7; margin-left: 3px; }
+  tr.filters th { top: 37px; cursor: default; padding-top: 0; }
+  tr.filters input { width: 100%; min-width: 70px; padding: 4px 8px; font-size: 12px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.click { cursor: pointer; }
+  tbody tr.click:hover td { background: var(--surface-2); }
+  tbody tr.win td { background: var(--accent-soft); }
+  td .trunc { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+  .empty { padding: 36px; text-align: center; color: var(--muted); }
+  .scorebar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .scorebar .track { position: relative; width: 90px; height: 7px; background: var(--surface-2); border-radius: 99px; }
+  .scorebar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bar); border-radius: 99px; }
+  .scorebar .fill.win { background: var(--bar-win); }
+  .scorebar .ci { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--text); border-right: 2px solid var(--text); opacity: .35; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 22px 0 18px; overflow-x: auto; }
+  .tabs a { padding: 9px 14px; color: var(--muted); font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabs .count { font-size: 11px; background: var(--surface-2); border-radius: 99px; padding: 0 7px; margin-left: 5px; color: var(--muted); }
+  pre { background: var(--surface-2); border-radius: 8px; padding: 12px 14px; overflow: auto; max-height: 420px; white-space: pre-wrap;
+        word-break: break-word; margin: 6px 0 0; }
+  details > summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
+  .exp-card { display: flex; flex-direction: column; gap: 10px; cursor: pointer; transition: border-color .15s, transform .15s; }
+  .exp-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .exp-card .q { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 42px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .answer { border-color: var(--accent); background: linear-gradient(0deg, var(--surface), var(--accent-soft)); margin-top: 14px; }
+  .answer .big { font-size: 18px; font-weight: 700; margin: 4px 0 8px; }
+  .chart .lvl { display: grid; grid-template-columns: 150px 1fr 60px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
+  .chart .lvl .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart .lvl .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .chart .bar { position: relative; height: 14px; background: var(--surface-2); border-radius: 4px; }
+  .chart .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--bar); border-radius: 4px; }
+  .chart .bar .fill.win { background: var(--bar-win); }
+  .chart .bar .ci { position: absolute; top: 3px; bottom: 3px; border-left: 2px solid var(--text); border-right: 2px solid var(--text); opacity: .45; }
+  .chart .bar .ci::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid var(--text); }
+  .drawer-bg { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 20; display: none; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--surface); z-index: 21;
+            border-left: 1px solid var(--border); box-shadow: -8px 0 30px rgba(0,0,0,.15); transform: translateX(100%);
+            transition: transform .2s ease, visibility .2s; display: flex; flex-direction: column; visibility: hidden; }
+  .drawer.open { transform: none; visibility: visible; } .drawer-bg.open { display: block; }
+  .drawer header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .drawer header h3 { margin: 0; font-size: 15px; word-break: break-all; }
+  .drawer .body { padding: 6px 20px 30px; overflow: auto; }
+  .media img, .media video { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; }
+  .media audio { width: 100%; margin-top: 6px; }
+  .media { margin: 10px 0; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13px; align-items: center; }
+  .kv > :nth-child(odd) { color: var(--muted); }
+  .kv .scorebar { justify-content: flex-start; }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px;
+           border-radius: 8px; font-weight: 600; z-index: 30; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .rate { max-width: 760px; margin: 0 auto; }
+  .scale { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 18px 0 6px; }
+  .scale .btn { min-width: 56px; padding: 12px 0; font-size: 16px; }
+  .kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+  ol.steps { margin: 8px 0 0 18px; padding: 0; line-height: 2.1; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    aside { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; padding: 10px 12px; }
+    .brand { padding: 0 8px 0 0; } .nav { display: flex; gap: 2px; } .source { display: none; }
+    main { padding: 20px 16px 60px; }
+    .toolbar input[type=search] { width: 100%; }
+    .chart .lvl { grid-template-columns: 100px 1fr 50px; }
+    .cards { grid-template-columns: minmax(0, 1fr); }
+  }
 </style>
 </head>
 <body>
-<header>
-  <b>hone-select</b>
-  <a href="#/">Runs</a>
-  <a href="#/candidates">Candidates across runs</a>
-  <a href="#/experiments">Experiments</a>
-  <span class="muted" id="status"></span>
-</header>
-<main id="main"></main>
+<div class="app">
+  <aside>
+    <div class="brand"><span class="dot"></span>hone-select</div>
+    <nav class="nav">
+      <a data-nav="experiments" href="#/experiments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/></svg>Experiments</a>
+      <a data-nav="runs" href="#/runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Runs</a>
+      <a data-nav="candidates" href="#/candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Candidates</a>
+    </nav>
+    <div class="source" id="source"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div class="drawer-bg" id="drawer-bg"></div>
+<div class="drawer" id="drawer" aria-hidden="true"><header><h3 id="drawer-title"></h3><button class="btn small" id="drawer-close">Close <span class="kbd">Esc</span></button></header><div class="body" id="drawer-body"></div></div>
+<div class="toast" id="toast"></div>
 <script>
-const main = document.getElementById("main");
-const esc = v => String(v ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-const num = v => typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(3)) : (v ?? "—");
+// ---- helpers ---------------------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const main = $("main");
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const fmt = v => typeof v === "number" ? (Object.is(v, -0) || Math.abs(v) < 5e-4 ? "0" : Number.isInteger(v) ? v.toLocaleString() : v.toFixed(3)) : (v ?? "—");
+const signed = v => typeof v === "number" ? (fmt(v) === "0" ? "0" : v > 0 ? `+${fmt(v)}` : fmt(v)) : "—";
 const flat = v => v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-const time = s => s ? s.replace("T", " ").slice(0, 19) : "";
-const secs = (a, b) => a && b ? ((new Date(b) - new Date(a)) / 1000).toFixed(1) : "";
+const when = s => s ? new Date(s).toLocaleString([], {dateStyle: "medium", timeStyle: "short"}) : "";
+const secs = (a, b) => a && b ? (new Date(b) - new Date(a)) / 1000 : null;
+const duration = s => s === null || s === undefined ? "—" : s < 60 ? `${s.toFixed(1)} s` : s < 3600 ? `${(s / 60).toFixed(1)} min` : `${(s / 3600).toFixed(1)} h`;
+const pct = v => typeof v === "number" ? `${Math.round(v * 100)}%` : "—";
+let refresh = null;
 async function get(path) {
   const r = await fetch(path);
   const body = await r.json();
   if (!r.ok) throw new Error(body.error || r.statusText);
   return body;
 }
-
-// A table: columns = [{key, label, get(row) -> value, html(row) -> cell html, num}], per-column filters,
-// click a header to sort, onRow(row, tr) for clicks. Returns nothing; renders into `el`.
-function table(el, columns, rows, onRow) {
-  const state = {sort: null, dir: 1, filters: {}};
-  el.innerHTML = `<div class="bar"><input placeholder="filter every column" size="36"> <span class="muted"></span></div>
-    <div class="wrap"><table><thead><tr>${columns.map((c, i) =>
-      `<th data-i="${i}">${esc(c.label)}<br><input data-f="${i}" placeholder="filter"></th>`).join("")}</tr></thead>
-    <tbody></tbody></table></div>`;
-  const [all, count] = [el.querySelector(".bar input"), el.querySelector(".bar span")];
-  const body = el.querySelector("tbody");
-  const value = (c, r) => c.get ? c.get(r) : r[c.key];
-  function render() {
-    const words = all.value.toLowerCase().split(/\s+/).filter(Boolean);
-    let shown = rows.filter(r => {
-      const cells = columns.map(c => flat(value(c, r)).toLowerCase());
-      return words.every(w => cells.some(t => t.includes(w))) &&
-        Object.entries(state.filters).every(([i, f]) => !f || cells[i].includes(f));
-    });
-    if (state.sort !== null) {
-      const c = columns[state.sort];
-      shown = [...shown].sort((a, b) => {
-        const [x, y] = [value(c, a), value(c, b)];
-        if (x === y) return 0; if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1;
-        return (typeof x === "number" && typeof y === "number" ? x - y : flat(x).localeCompare(flat(y))) * state.dir;
-      });
-    }
-    count.textContent = `${shown.length} of ${rows.length}`;
-    body.innerHTML = "";
-    for (const r of shown) {
-      const tr = document.createElement("tr");
-      if (r.winner === true) tr.className = "win";
-      if (onRow) tr.classList.add("clickable");
-      tr.innerHTML = columns.map(c => `<td class="${c.num ? "num" : ""}">${c.html ? c.html(r) : esc(c.num ? num(value(c, r)) : flat(value(c, r)))}</td>`).join("");
-      if (onRow) tr.onclick = () => onRow(r, tr);
-      body.appendChild(tr);
-    }
-  }
-  all.oninput = render;
-  el.querySelectorAll("th input").forEach(inp => {
-    inp.onclick = e => e.stopPropagation();
-    inp.oninput = () => { state.filters[inp.dataset.f] = inp.value.toLowerCase(); render(); };
-  });
-  el.querySelectorAll("th").forEach(th => th.onclick = () => {
-    const i = Number(th.dataset.i);
-    state.dir = state.sort === i ? -state.dir : 1; state.sort = i; render();
-  });
-  render();
-}
-
-const ctx = r => Object.entries(r.context || {}).map(([k, v]) => `${k.replace("hone.", "")}=${v}`).join(" ");
-
-async function showRuns() {
-  const runs = await get("/api/runs");
-  main.innerHTML = `<h2>Runs</h2><div id="t"></div>`;
-  table(document.getElementById("t"), [
-    {key: "start", label: "started", get: r => time(r.start)},
-    {key: "run_id", label: "run"},
-    {label: "context", get: ctx},
-    {key: "policy", label: "policy"},
-    {key: "n", label: "n", num: true},
-    {key: "candidate_count", label: "candidates", num: true},
-    {key: "rejected", label: "rejected", num: true},
-    {key: "winner", label: "winner", get: r => r.winner ?? "none"},
-    {key: "winner_total", label: "winner total", num: true},
-    {label: "fallback / escalated", get: r => [r.fallback ? "fallback" : "", r.escalated ? "escalated" : ""].join(" ").trim()},
-    {label: "seconds", get: r => Number(secs(r.start, r.end)), num: true},
-    {key: "status", label: "status", html: r => `<span class="${r.status === "error" ? "bad" : ""}">${esc(r.status)}</span>`},
-  ], runs, r => { location.hash = `#/run/${r.run_id}`; });
-}
-
-function candidateDetail(c) {
-  const scores = Object.entries(c.scores).map(([k, s]) =>
-    `<b>${esc(k)}</b>: ${num(s.value)}${s.confidence != null ? ` (confidence ${num(s.confidence)})` : ""}${s.cache_hit ? " · cached" : ""}` +
-    `${s.reason ? `<pre>${esc(flat(s.reason))}</pre>` : "<br>"}${s.error ? `<pre class="bad">${esc(flat(s.error))}</pre>` : ""}`).join("");
-  const gates = Object.entries(c.gates).map(([k, g]) =>
-    `<b>${esc(k)}</b>: <span class="${g.passed ? "ok" : "bad"}">${g.passed ? "passed" : "failed"}</span>` +
-    `${g.details ? `<pre>${esc(JSON.stringify(g.details, null, 2))}</pre>` : "<br>"}${g.error ? `<pre class="bad">${esc(g.error)}</pre>` : ""}`).join("");
-  return `${c.preview ? `<b>data preview</b><pre>${esc(c.preview)}</pre>` : ""}${gates ? `<h2>Gates</h2>${gates}` : ""}` +
-    `${scores ? `<h2>Scores</h2>${scores}` : ""}<details><summary>meta</summary><pre>${esc(JSON.stringify(c.meta, null, 2))}</pre></details>`;
-}
-
-async function showRun(id) {
-  const r = await get(`/api/runs/${id}`);
-  const cards = [["policy", r.policy], ["n", r.n], ["candidates", r.candidate_count], ["rejected", r.rejected],
-    ["winner", r.winner ?? "none"], ["winner total", num(r.winner_total)], ["seconds", secs(r.start, r.end)],
-    ["started", time(r.start)], ...Object.entries(r.budget).map(([k, v]) => [`budget ${k}`, num(v)]),
-    ...Object.entries(r.context).map(([k, v]) => [k.replace("hone.", ""), v])];
-  main.innerHTML = `<h2>Run ${esc(r.run_id)}</h2>
-    <div class="grid">${cards.map(([k, v]) => `<div class="card"><div>${esc(k)}</div><div>${esc(v)}</div></div>`).join("")}</div>
-    <h2>What was tested</h2>
-    <details open><summary>configuration</summary><pre>${r.config ? esc(JSON.stringify(r.config, null, 2)) : "not recorded (a run from before design change 0008)"}</pre></details>
-    <details><summary>task</summary><pre>${r.task ? esc(flat(r.task)) : "not recorded"}</pre></details>
-    <h2>Candidates</h2><p class="muted">Click a row for its data, gate details and every score's reason.</p><div id="t"></div>
-    ${r.pairwise.length ? `<h2>Pairwise judgements</h2><div id="p"></div>` : ""}
-    <h2>Decision trace</h2><div id="d"></div>
-    ${r.errors.length ? `<h2>Errors</h2><pre class="bad">${esc(r.errors.map(e => `${e.span}: ${e.message}`).join("\n"))}</pre>` : ""}`;
-  const cols = [
-    {key: "rank", label: "rank", num: true},
-    {key: "id", label: "candidate"},
-    ...r.columns.params.map(p => ({label: p, get: c => c.params[p]})),
-    ...r.columns.gates.map(g => ({label: `gate: ${g}`, get: c => c.gates[g] ? (c.gates[g].passed ? "pass" : "fail") : "",
-      html: c => c.gates[g] ? `<span class="${c.gates[g].passed ? "ok" : "bad"}">${c.gates[g].passed ? "pass" : "fail"}</span>` : ""})),
-    ...r.columns.scores.map(s => ({label: s, num: true, get: c => c.scores[s]?.value ?? null})),
-    {key: "total", label: "total", num: true},
-    {key: "stage_reached", label: "stage", num: true},
-    {key: "rejected", label: "rejected", get: c => c.rejected ? "yes" : ""},
-    {key: "winner", label: "winner", get: c => c.winner ? "★" : ""},
-  ];
-  table(document.getElementById("t"), cols, r.candidates, (c, tr) => {
-    if (tr.nextSibling && tr.nextSibling.classList.contains("detail")) { tr.nextSibling.remove(); return; }
-    const d = document.createElement("tr");
-    d.className = "detail";
-    d.innerHTML = `<td colspan="${cols.length}">${candidateDetail(c)}</td>`;
-    tr.after(d);
-  });
-  if (r.pairwise.length) table(document.getElementById("p"),
-    [{key: "a", label: "A"}, {key: "b", label: "B"}, {key: "choice", label: "choice"}, {key: "judge", label: "judge"}], r.pairwise);
-  table(document.getElementById("d"), [{key: "event", label: "event"},
-    {label: "details", get: e => Object.entries(e).filter(([k]) => k !== "event").map(([k, v]) => `${k}=${flat(v)}`).join("  ")}],
-    r.decision_trace);
-}
-
-async function showCandidates() {
-  const rows = await get("/api/candidates");
-  const params = [...new Set(rows.flatMap(c => Object.keys(c.params)))];
-  const scorers = [...new Set(rows.flatMap(c => Object.keys(c.scores)))];
-  main.innerHTML = `<h2>Candidates across runs</h2>
-    <div class="bar">Compare by <select id="g"><option value="">(choose a variation param)</option>
-      ${params.map(p => `<option>${esc(p)}</option>`).join("")}</select>
-      <span class="muted">candidates, wins and mean total per value, over the rows the filters below keep</span></div>
-    <div id="s"></div><h2>All candidates</h2><div id="t"></div>`;
-  let kept = rows;
-  const group = () => {
-    const key = document.getElementById("g").value;
-    const out = document.getElementById("s");
-    if (!key) { out.innerHTML = ""; return; }
-    const by = {};
-    for (const c of kept) {
-      const v = flat(c.params[key]);
-      const g = by[v] ??= {value: v, candidates: 0, wins: 0, totals: []};
-      g.candidates++; if (c.winner) g.wins++; if (typeof c.total === "number") g.totals.push(c.total);
-    }
-    const summary = Object.values(by).map(g => ({...g, win_rate: g.wins / g.candidates,
-      mean_total: g.totals.length ? g.totals.reduce((a, b) => a + b, 0) / g.totals.length : null}));
-    table(out, [{key: "value", label: key}, {key: "candidates", label: "candidates", num: true},
-      {key: "wins", label: "wins", num: true}, {key: "win_rate", label: "win rate", num: true},
-      {key: "mean_total", label: "mean total", num: true}], summary);
-  };
-  document.getElementById("g").onchange = group;
-  const cols = [
-    {key: "start", label: "run started", get: c => time(c.start)}, {key: "run_id", label: "run"},
-    {label: "context", get: c => ctx(c)}, {key: "id", label: "candidate"},
-    ...params.map(p => ({label: p, get: c => c.params[p]})),
-    ...scorers.map(s => ({label: s, num: true, get: c => c.scores[s] ?? null})),
-    {key: "total", label: "total", num: true}, {key: "rank", label: "rank", num: true},
-    {key: "winner", label: "winner", get: c => c.winner ? "★" : ""},
-  ];
-  // re-run the comparison whenever the table's filters change
-  const t = document.getElementById("t");
-  table(t, cols, rows, c => { location.hash = `#/run/${c.run_id}`; });
-  t.addEventListener("input", () => setTimeout(() => {
-    const ids = new Set([...t.querySelectorAll("tbody tr")].map(tr => tr.children[1].textContent + "|" + tr.children[3].textContent));
-    kept = rows.filter(c => ids.has(c.run_id + "|" + c.id)); group();
-  }));
-}
-
-// ---- experiments (design change 0009) ----------------------------------------------------------------
 async function send(path, body) {
-  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Hone-Dashboard": "1"},
-                               body: JSON.stringify(body)});
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Hone-Dashboard": "1"}, body: JSON.stringify(body)});
   const out = await r.json();
   if (!r.ok) throw new Error(out.error || r.statusText);
   return out;
 }
-const badge = s => `<span class="${s === "denied" || s === "stopped" ? "bad" : s === "completed" || s === "approved" ? "ok" : ""}">${esc(s)}</span>`;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1800); }
+function copy(text) { navigator.clipboard?.writeText(text).then(() => toast("Copied"), () => toast(text)); }
+const cmd = text => `<span class="cmd"><code title="${esc(text)}">${esc(text)}</code><button class="btn small" data-copy="${esc(text)}">Copy</button></span>`;
+document.addEventListener("click", e => { const b = e.target.closest("[data-copy]"); if (b) { e.stopPropagation(); copy(b.dataset.copy); } });
+
+const STATUS = {completed: "ok", approved: "info", running: "accent", proposed: "warn", denied: "bad", stopped: "bad", draft: "", ok: "ok", error: "bad", unset: ""};
+const pill = s => `<span class="pill ${STATUS[s] ?? ""}">${esc(s)}</span>`;
+const chips = obj => Object.entries(obj || {}).map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(flat(v))}</b></span>`).join("");
+const ctxChips = r => Object.entries(r.context || {}).map(([k, v]) => `<span class="chip">${esc(k.replace("hone.", ""))} <b>${esc(v)}</b></span>`).join("");
+const tile = (label, value, sub = "") => `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+const progress = (done, total) => `<div class="progress"><div style="width:${total ? Math.min(100, 100 * done / total) : 0}%"></div></div>`;
+function head(title, sub = "", crumbs = "", actions = "") {
+  return `<div class="head"><div>${crumbs ? `<div class="crumbs">${crumbs}</div>` : ""}<h1>${title}</h1>${sub ? `<p>${sub}</p>` : ""}</div><div>${actions}</div></div>`;
+}
+function scorebar(v, {low = null, high = null, win = false, max = 1} = {}) {
+  if (typeof v !== "number") return `<span class="muted">—</span>`;
+  const w = x => `${Math.max(0, Math.min(100, 100 * x / max))}%`;
+  const ci = typeof low === "number" && typeof high === "number" ? `<div class="ci" style="left:${w(low)};width:calc(${w(high)} - ${w(low)})"></div>` : "";
+  return `<div class="scorebar"><span>${fmt(v)}</span><div class="track"><div class="fill ${win ? "win" : ""}" style="width:${w(v)}"></div>${ci}</div></div>`;
+}
+function openDrawer(title, html) {
+  $("drawer-title").textContent = title; $("drawer-body").innerHTML = html;
+  $("drawer").classList.add("open"); $("drawer-bg").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false");
+}
+function closeDrawer() { $("drawer").classList.remove("open"); $("drawer-bg").classList.remove("open"); $("drawer").setAttribute("aria-hidden", "true"); }
+$("drawer-close").onclick = closeDrawer; $("drawer-bg").onclick = closeDrawer;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+
+// A table: columns [{key, label, get(row), html(row), num, title}], one search box, optional per-column
+// filters, sortable headers, click on a row. opts: {onRow, empty, rowClass, maxHeight}.
+function table(el, columns, rows, opts = {}) {
+  const st = {sort: null, dir: -1, filters: {}, showFilters: false};
+  const val = (c, r) => c.get ? c.get(r) : r[c.key];
+  el.innerHTML = `<div class="toolbar"><input type="search" placeholder="Search…" aria-label="Search the table"><button class="btn small" data-f>Filters</button>
+    <span class="muted count"></span></div><div class="tablewrap"${opts.maxHeight ? ` style="max-height:${opts.maxHeight}"` : ""}><table><thead></thead><tbody></tbody></table></div>`;
+  const [search, fbtn, count] = [el.querySelector("input"), el.querySelector("[data-f]"), el.querySelector(".count")];
+  const thead = el.querySelector("thead"), tbody = el.querySelector("tbody");
+  function drawHead() {
+    thead.innerHTML = `<tr>${columns.map((c, i) => `<th data-i="${i}" class="${c.num ? "num" : ""}" title="${esc(c.title || "Sort")}">${esc(c.label)}${st.sort === i ? `<span class="arrow">${st.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}</tr>` +
+      (st.showFilters ? `<tr class="filters">${columns.map((c, i) => `<th><input data-i="${i}" value="${esc(st.filters[i] || "")}" placeholder="filter" aria-label="Filter ${esc(c.label)}"></th>`).join("")}</tr>` : "");
+    thead.querySelectorAll("tr:first-child th").forEach(th => th.onclick = () => {
+      const i = Number(th.dataset.i); st.dir = st.sort === i ? -st.dir : -1; st.sort = i; drawHead(); drawBody();
+    });
+    thead.querySelectorAll("tr.filters input").forEach(inp => inp.oninput = () => { st.filters[inp.dataset.i] = inp.value.toLowerCase(); drawBody(); });
+  }
+  function drawBody() {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = rows.filter(r => {
+      const cells = columns.map(c => flat(val(c, r)).toLowerCase());
+      return words.every(w => cells.some(t => t.includes(w))) && Object.entries(st.filters).every(([i, f]) => !f || cells[i].includes(f));
+    });
+    if (st.sort !== null) {
+      const c = columns[st.sort];
+      shown = [...shown].sort((a, b) => {
+        const [x, y] = [val(c, a), val(c, b)];
+        if (x === y) return 0; if (x === null || x === undefined || x === "") return 1; if (y === null || y === undefined || y === "") return -1;
+        return (typeof x === "number" && typeof y === "number" ? x - y : flat(x).localeCompare(flat(y), undefined, {numeric: true})) * st.dir;
+      });
+    }
+    count.textContent = shown.length === rows.length ? `${rows.length} ${rows.length === 1 ? "row" : "rows"}` : `${shown.length} of ${rows.length}`;
+    el.dispatchEvent(new CustomEvent("shown", {detail: shown}));
+    if (!shown.length) { tbody.innerHTML = `<tr><td colspan="${columns.length}" class="empty">${esc(rows.length ? "Nothing matches the search or filters." : opts.empty || "Nothing here yet.")}</td></tr>`; return; }
+    tbody.innerHTML = "";
+    for (const r of shown) {
+      const tr = document.createElement("tr");
+      if (opts.onRow) tr.className = "click";
+      const extra = opts.rowClass ? opts.rowClass(r) : "";
+      if (extra) tr.classList.add(extra);
+      tr.innerHTML = columns.map(c => {
+        const v = val(c, r);
+        const inner = c.html ? c.html(r) : c.num ? esc(fmt(v)) : `<span class="trunc" title="${esc(flat(v))}">${esc(flat(v))}</span>`;
+        return `<td class="${c.num ? "num" : ""}">${inner}</td>`;
+      }).join("");
+      if (opts.onRow) tr.onclick = () => opts.onRow(r);
+      tbody.appendChild(tr);
+    }
+  }
+  search.oninput = drawBody;
+  fbtn.onclick = () => { st.showFilters = !st.showFilters; fbtn.classList.toggle("primary", st.showFilters); drawHead(); };
+  drawHead(); drawBody();
+}
+
 const fileView = (eid, base, name) => {
   const url = `/files/${encodeURIComponent(eid)}/${base}/${name.split("/").map(encodeURIComponent).join("/")}`;
-  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return `<div><img src="${url}" style="max-width:100%;max-height:420px"><br>${esc(name)}</div>`;
-  if (/\.(wav|mp3|ogg|flac|m4a)$/i.test(name)) return `<div><audio controls src="${url}"></audio> ${esc(name)}</div>`;
-  if (/\.(mp4|webm|mov)$/i.test(name)) return `<div><video controls src="${url}" style="max-width:100%;max-height:420px"></video><br>${esc(name)}</div>`;
-  return `<div><a href="${url}" target="_blank">${esc(name)}</a></div>`;
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><img src="${url}" alt="${esc(name)}"></div>`;
+  if (/\.(wav|mp3|ogg|flac|m4a)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><audio controls src="${url}"></audio></div>`;
+  if (/\.(mp4|webm|mov)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><video controls src="${url}"></video></div>`;
+  return `<div class="media"><a href="${url}" target="_blank">${esc(name)}</a></div>`;
 };
+const outputView = v => v === null || v === undefined ? "" : `<pre>${esc(typeof v === "object" ? JSON.stringify(v, null, 2) : String(v))}</pre>`;
 
+// ---- runs ------------------------------------------------------------------------------------------
+async function showRuns() {
+  const runs = await get("/api/runs");
+  main.innerHTML = head("Runs", "Every best-of-N selection recorded in the span store, newest first. Open one to see how its winner was chosen.") + `<div id="t"></div>`;
+  table($("t"), [
+    {label: "Started", get: r => r.start, html: r => `<span title="${esc(r.start)}">${esc(when(r.start))}</span>`},
+    {key: "run_id", label: "Run", html: r => `<span class="mono">${esc(r.run_id)}</span>`},
+    {label: "Where", get: r => flat(r.context), html: r => ctxChips(r) || `<span class="muted">—</span>`},
+    {key: "policy", label: "Policy"},
+    {key: "candidate_count", label: "Candidates", num: true},
+    {key: "rejected", label: "Rejected", num: true},
+    {key: "winner_total", label: "Winner total", num: true, html: r => scorebar(r.winner_total, {win: true})},
+    {label: "Notes", get: r => [r.fallback ? "fallback" : "", r.escalated ? "escalated" : "", r.winner ? "" : "no winner"].join(" ").trim(),
+     html: r => [r.fallback ? `<span class="pill warn">fallback</span>` : "", r.escalated ? `<span class="pill info">escalated</span>` : "", r.winner ? "" : `<span class="pill bad">no winner</span>`].join(" ")},
+    {label: "Duration", num: true, get: r => secs(r.start, r.end), html: r => esc(duration(secs(r.start, r.end)))},
+    {key: "status", label: "Status", html: r => pill(r.status)},
+  ], runs, {onRow: r => { location.hash = `#/run/${r.run_id}`; }, empty: "No selection has run with this store yet."});
+}
+
+function candidateDrawer(c) {
+  const scores = Object.entries(c.scores).map(([k, s]) => `<div class="row" style="margin-top:14px"><b>${esc(k)}</b>${scorebar(s.value)}</div>${s.reason ? `<pre>${esc(flat(s.reason))}</pre>` : ""}${s.error ? `<pre style="color:var(--bad)">${esc(flat(s.error))}</pre>` : ""}`).join("");
+  const gates = Object.entries(c.gates).map(([k, g]) => `<div class="row" style="margin-top:10px"><b>${esc(k)}</b>${g.passed ? `<span class="pill ok">passed</span>` : `<span class="pill bad">failed</span>`}</div>${g.details ? `<pre>${esc(JSON.stringify(g.details, null, 2))}</pre>` : ""}${g.error ? `<pre style="color:var(--bad)">${esc(g.error)}</pre>` : ""}`).join("");
+  openDrawer(`Candidate ${c.id}`, `<div class="kv" style="margin:14px 0"><span>Rank</span><span>${fmt(c.rank)}</span><span>Total</span><span>${scorebar(c.total, {win: c.winner})}</span><span>Settings</span><span>${chips(c.params) || "—"}</span></div>
+    ${c.preview ? `<h2>Output</h2><pre>${esc(c.preview)}</pre>` : ""}${gates ? `<h2>Gates</h2>${gates}` : ""}${scores ? `<h2>Scores</h2>${scores}` : ""}
+    <details><summary>Meta</summary><pre>${esc(JSON.stringify(c.meta, null, 2))}</pre></details>`);
+}
+
+async function showRun(id) {
+  const r = await get(`/api/runs/${id}`);
+  const top = r.candidates.reduce((m, c) => Math.max(m, typeof c.total === "number" ? c.total : 0), 0) || 1;
+  main.innerHTML = head(`Run <span class="mono">${esc(r.run_id)}</span>`, ctxChips(r), `<a href="#/runs">Runs</a> / run`, pill(r.status)) +
+    `<div class="grid">${[tile("Winner", r.winner ? `<span class="mono" style="font-size:13px;font-weight:600;word-break:break-all" title="${esc(r.winner)}">${esc(r.winner)}</span>` : "none"), tile("Winner total", fmt(r.winner_total)),
+      tile("Candidates", fmt(r.candidate_count), `${fmt(r.rejected)} rejected`), tile("Policy", esc(r.policy)), tile("Duration", duration(secs(r.start, r.end)), esc(when(r.start))),
+      ...Object.entries(r.budget).map(([k, v]) => tile(`Budget: ${k.replaceAll("_", " ")}`, fmt(v)))].join("")}</div>
+    <h2>Candidates</h2><p class="muted" style="margin-top:-4px">Best first. Click a candidate for its output, gates and every judge's reason.</p><div id="t"></div>
+    <h2>What was tested</h2><div class="card"><details ${r.config ? "open" : ""}><summary>Configuration</summary><pre>${r.config ? esc(JSON.stringify(r.config, null, 2)) : "Not recorded (a run from before the dashboard existed)."}</pre></details>
+      <details><summary>Task</summary><pre>${r.task ? esc(flat(r.task)) : "Not recorded."}</pre></details></div>
+    ${r.pairwise.length ? `<h2>Pairwise judgements</h2><div id="p"></div>` : ""}
+    <h2>Decision trace</h2><div id="d"></div>
+    ${r.errors.length ? `<h2>Errors</h2><pre style="color:var(--bad)">${esc(r.errors.map(e => `${e.span}: ${e.message}`).join("\n"))}</pre>` : ""}`;
+  table($("t"), [
+    {key: "rank", label: "#", num: true},
+    {key: "id", label: "Candidate", html: c => `<span class="mono">${esc(c.id)}</span>${c.winner ? ` <span class="pill accent">winner</span>` : ""}`},
+    ...r.columns.params.map(p => ({label: p, get: c => c.params[p]})),
+    ...r.columns.gates.map(g => ({label: g, title: "gate", get: c => c.gates[g] ? (c.gates[g].passed ? "pass" : "fail") : "",
+      html: c => c.gates[g] ? (c.gates[g].passed ? `<span class="pill ok">pass</span>` : `<span class="pill bad">fail</span>`) : ""})),
+    ...r.columns.scores.map(s => ({label: s, num: true, get: c => c.scores[s]?.value ?? null, html: c => scorebar(c.scores[s]?.value ?? null)})),
+    {key: "total", label: "Total", num: true, html: c => scorebar(c.total, {win: c.winner, max: top})},
+    {key: "rejected", label: "Rejected", get: c => c.rejected ? "yes" : "", html: c => c.rejected ? `<span class="pill bad">rejected</span>` : ""},
+  ], r.candidates, {onRow: candidateDrawer, rowClass: c => c.winner ? "win" : ""});
+  if (r.pairwise.length) table($("p"), [{key: "a", label: "A"}, {key: "b", label: "B"}, {key: "choice", label: "Choice"}, {key: "judge", label: "Judge"}], r.pairwise);
+  table($("d"), [{key: "event", label: "Event"}, {label: "Details", get: e => Object.entries(e).filter(([k]) => k !== "event").map(([k, v]) => `${k}=${flat(v)}`).join("  ")}], r.decision_trace);
+}
+
+// ---- candidates across runs -----------------------------------------------------------------------
+async function showCandidates() {
+  const rows = await get("/api/candidates");
+  const params = [...new Set(rows.flatMap(c => Object.keys(c.params)))];
+  const scorers = [...new Set(rows.flatMap(c => Object.keys(c.scores)))];
+  main.innerHTML = head("Candidates", "Every candidate of every run. Compare by a setting that was varied (a model, a temperature) to see which value wins.") +
+    `<div class="card"><div class="row"><div><b>Compare by</b> <select id="g" aria-label="Compare by"><option value="">choose a setting</option>${params.map(p => `<option>${esc(p)}</option>`).join("")}</select></div>
+      <span class="muted">over the candidates the table below keeps</span></div><div id="s" style="margin-top:12px"></div></div>
+    <h2>All candidates</h2><div id="t"></div>`;
+  let kept = rows;
+  const group = () => {
+    const key = $("g").value, out = $("s");
+    if (!key) { out.innerHTML = `<div class="muted">${params.length ? "Pick a setting to compare its values." : "No varied settings recorded yet."}</div>`; return; }
+    const by = {};
+    for (const c of kept) {
+      const g = by[flat(c.params[key])] ??= {value: flat(c.params[key]), candidates: 0, wins: 0, totals: []};
+      g.candidates++; if (c.winner) g.wins++; if (typeof c.total === "number") g.totals.push(c.total);
+    }
+    const levels = Object.values(by).map(g => ({...g, win_rate: g.wins / g.candidates, mean: g.totals.length ? g.totals.reduce((a, b) => a + b, 0) / g.totals.length : null}))
+      .sort((a, b) => b.win_rate - a.win_rate);
+    if (!levels.length) { out.innerHTML = `<div class="muted">No candidates match.</div>`; return; }
+    out.innerHTML = `<div class="chart">${levels.map((l, i) => `<div class="lvl"><div class="name" title="${esc(l.value)}"><b>${esc(l.value || "(not set)")}</b></div>
+      <div class="bar"><div class="fill ${i === 0 ? "win" : ""}" style="width:${100 * l.win_rate}%"></div></div><div class="num">${pct(l.win_rate)}</div></div>`).join("")}</div>
+      <div class="muted" style="margin-top:6px;font-size:12.5px">Win rate per value · ${levels.map(l => `${esc(l.value || "(not set)")}: ${l.wins} of ${l.candidates}, mean total ${fmt(l.mean)}`).join(" · ")}</div>`;
+  };
+  $("g").onchange = group;
+  const t = $("t");
+  t.addEventListener("shown", e => { kept = e.detail; group(); });
+  table(t, [
+    {label: "Run started", get: c => c.start, html: c => esc(when(c.start))},
+    {key: "run_id", label: "Run", html: c => `<span class="mono">${esc(c.run_id)}</span>`},
+    {label: "Where", get: c => flat(c.context), html: c => ctxChips(c)},
+    {key: "id", label: "Candidate", html: c => `<span class="mono">${esc(c.id)}</span>`},
+    ...params.map(p => ({label: p, get: c => c.params[p]})),
+    ...scorers.map(s => ({label: s, num: true, get: c => c.scores[s] ?? null, html: c => scorebar(c.scores[s] ?? null)})),
+    {key: "total", label: "Total", num: true, html: c => scorebar(c.total, {win: c.winner})},
+    {key: "rank", label: "#", num: true},
+  ], rows, {onRow: c => { location.hash = `#/run/${c.run_id}`; }, rowClass: c => c.winner ? "win" : "", empty: "No candidates recorded yet."});
+}
+
+// ---- experiments -----------------------------------------------------------------------------------
+const howItWorks = `<div class="card"><b>How experiments work</b><ol class="steps muted">
+  <li>Create one: ${cmd('hone-select experiments new "Which model writes best"')} and edit its <code>experiment.toml</code>.</li>
+  <li>Plan it: ${cmd("hone-select experiments plan E0001")} and approve or deny the plan here.</li>
+  <li>Run it: ${cmd("hone-select experiments start E0001")} and read the results here.</li></ol></div>`;
 async function showExperiments() {
   const rows = await get("/api/experiments");
-  main.innerHTML = `<h2>Experiments</h2><p class="muted">Create one with <code>hone-select experiments new "title"</code>,
-    then <code>plan</code> it; approve or deny it here; run it with <code>hone-select experiments start EID</code>.</p><div id="t"></div>`;
-  table(document.getElementById("t"), [
-    {key: "eid", label: "id"}, {key: "title", label: "title"},
-    {key: "status", label: "status", html: r => badge(r.status)},
-    {label: "progress", get: r => `${r.done}/${r.outputs ?? "?"}`},
-    {label: "decided", get: r => r.review ? `${r.review.decision} by ${r.review.by}` : ""},
-    {key: "question", label: "question"},
-  ], rows, r => { location.hash = `#/experiment/${r.eid}`; });
+  const waiting = rows.filter(r => r.status === "proposed").length;
+  main.innerHTML = head("Experiments", "Comparisons of models, settings, prompts or programs over fixed test cases. Nothing runs before its plan is approved.",
+    "", waiting ? `<span class="pill warn">${waiting} waiting for your decision</span>` : "") +
+    (rows.length ? `<div class="cards">${rows.map(expCard).join("")}</div><div style="margin-top:22px">${howItWorks}</div>` : howItWorks);
+  main.querySelectorAll("[data-eid]").forEach(c => c.onclick = () => { location.hash = `#/experiment/${c.dataset.eid}`; });
+}
+function expCard(x) {
+  const next = {draft: "Needs a plan", proposed: `<b style="color:var(--warn)">Waiting for your decision</b>`, approved: "Ready to start",
+    running: "Running…", stopped: "Stopped — start resumes", denied: `Denied${x.review?.note ? `: ${esc(x.review.note)}` : ""}`, completed: "Results ready"}[x.status] || "";
+  return `<div class="card exp-card" data-eid="${esc(x.eid)}" tabindex="0"><div class="row"><span class="muted mono">${esc(x.eid)}</span>${pill(x.status)}</div>
+    <div style="font-weight:650;font-size:15px">${esc(x.title)}</div><div class="q">${esc(x.question) || "<i>No question written yet.</i>"}</div>
+    ${progress(x.done, x.outputs)}<div class="row muted" style="font-size:12.5px"><span>${fmt(x.done)} / ${fmt(x.outputs ?? "?")} outputs</span><span>${next}</span></div></div>`;
 }
 
-function reviewBox(x) {
-  if (x.status !== "proposed") return "";
-  return `<h2>Decision</h2><div class="card"><p>Read the plan below (what runs, how many outputs, the estimate), then decide.</p>
-    <textarea id="note" rows="2" style="width:100%" placeholder="note (required to deny)"></textarea>
-    <div class="bar"><button id="approve">Approve</button><button id="deny">Deny</button> <span id="rmsg" class="muted"></span></div></div>`;
+function decisionCard(x) {
+  const p = x.plan, e = p.estimate;
+  return `<div class="card callout warn"><div style="flex:1;min-width:280px">
+      <b>This plan needs your decision.</b><div class="muted" style="margin-top:4px">It produces <b>${fmt(p.outputs)}</b> outputs (${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples} ${p.samples === 1 ? "sample" : "samples"})
+      and ${fmt(p.judge_calls)} judge calls. Estimate: ${e.seconds === null ? "time unknown" : duration(e.seconds)}, ${e.money_usd === null ? "cost unknown" : "$" + fmt(e.money_usd)}.
+      See exactly what runs in the <a href="#/experiment/${esc(x.eid)}/plan">Plan</a> tab.</div>
+      <textarea id="note" rows="2" style="width:100%;margin-top:10px" placeholder="Note (required to deny)" aria-label="Note"></textarea></div>
+    <div style="display:flex;gap:8px"><button class="btn primary" id="approve">Approve</button><button class="btn danger" id="deny">Deny</button></div></div>`;
 }
-
-function planView(x) {
-  const p = x.plan;
-  if (!p) return `<p class="muted">No plan yet: run <code>hone-select experiments plan ${esc(x.eid)}</code>.</p>`;
-  const e = p.estimate;
-  return `<div class="grid">${[["cases", p.cases.length], ["setups", Object.keys(p.setups).length], ["samples each", p.samples],
-    ["outputs", p.outputs], ["judge calls", p.judge_calls], ["estimated seconds", e.seconds ?? "?"], ["estimated $", e.money_usd ?? "?"]]
-    .map(([k, v]) => `<div class="card"><div>${esc(k)}</div><div>${esc(v)}</div></div>`).join("")}</div>
-    <p class="muted">estimate: ${esc(e.from)}</p>
-    <b>What runs</b><pre>${esc(p.commands.join("\n"))}</pre>
-    <b>Setups</b><div id="setups"></div>`;
+function nextStep(x) {
+  if (x.status === "proposed" && x.plan) return decisionCard(x);
+  if (x.changed_since_plan) return `<div class="card callout bad"><div><b>The definition changed since the plan.</b> <span class="muted">Plan it again; the new plan needs a new decision.</span></div>${cmd(`hone-select experiments plan ${x.eid}`)}</div>`;
+  if (x.status === "running") return `<div class="card callout"><div style="flex:1;min-width:240px"><b>Running</b> <span class="muted">— ${fmt(x.done)} of ${fmt(x.outputs)} outputs. This page refreshes itself.</span><div style="margin-top:8px">${progress(x.done, x.outputs)}</div></div>${cmd(`hone-select experiments stop ${x.eid}`)}</div>`;
+  const steps = {draft: ["Plan it to see what will run and what it costs.", `hone-select experiments plan ${x.eid}`],
+    approved: [`Approved by ${x.review?.by ?? "?"}. Start it when you are ready.`, `hone-select experiments start ${x.eid}`],
+    stopped: ["Stopped before the end. Starting again resumes where it stopped.", `hone-select experiments start ${x.eid}`],
+    denied: [`Denied by ${x.review?.by ?? "?"}${x.review?.note ? `: ${x.review.note}` : ""}. Edit the definition, then plan it again.`, `hone-select experiments plan ${x.eid}`]}[x.status];
+  return steps ? `<div class="card callout ${x.status === "denied" ? "bad" : ""}"><div class="muted">${esc(steps[0])}</div>${cmd(steps[1])}</div>` : "";
 }
-
-function resultsView(x) {
-  const r = x.results;
-  if (!r) return "";
+function factorChart(name, levels) {
+  const entries = Object.entries(levels).filter(([, s]) => typeof s.total.mean === "number");
+  if (!entries.length) return "";
+  const max = Math.max(...entries.map(([, s]) => s.total.high ?? s.total.mean), 0.0001);
+  const best = entries.reduce((a, b) => (b[1].total.mean > a[1].total.mean ? b : a))[0];
+  const w = v => `${100 * v / max}%`;
+  return `<div class="card"><div class="row"><b>${esc(name)}</b><span class="muted">best: <b style="color:var(--accent)">${esc(best)}</b></span></div><div class="chart">${entries.map(([lvl, s]) =>
+    `<div class="lvl"><div class="name" title="${esc(lvl)}">${esc(lvl)}</div><div class="bar"><div class="fill ${lvl === best ? "win" : ""}" style="width:${w(s.total.mean)}"></div>${typeof s.total.low === "number" ? `<div class="ci" style="left:${w(s.total.low)};width:calc(${w(s.total.high)} - ${w(s.total.low)})"></div>` : ""}</div><div class="num">${fmt(s.total.mean)}</div></div>`).join("")}</div>
+    <div class="muted" style="font-size:12px">Mean total with its 95% interval. Pass rate: ${entries.map(([l, s]) => `${esc(l)} ${pct(s.pass_rate)}`).join(", ")}</div></div>`;
+}
+function overview(x) {
+  const r = x.results, used = x.samples.reduce((a, s) => a + (s.measurements.seconds || 0), 0);
+  const costs = x.samples.map(s => s.cost_usd).filter(v => typeof v === "number");
+  const errors = x.samples.filter(s => s.error).length;
+  const tiles = `<div class="grid">${[tile("Progress", `${fmt(x.done)} / ${fmt(x.outputs ?? "?")}`, progress(x.done, x.outputs)),
+    tile("Test cases", fmt(x.plan?.cases.length)), tile("Setups", fmt(x.plan ? Object.keys(x.plan.setups).length : null)),
+    tile("Errors", fmt(errors), x.samples.length ? `${pct(errors / x.samples.length)} of samples` : ""),
+    tile("Time used", duration(used)), tile("Cost", costs.length ? "$" + fmt(costs.reduce((a, b) => a + b, 0)) : "—", costs.length ? "" : "not reported")].join("")}</div>`;
+  if (!r) return tiles + `<div class="card empty" style="margin-top:14px">${x.samples.length ? "Results appear when the run completes." : "No outputs yet."}</div>`;
   const best = r.best ? r.setups[r.best] : null;
-  return `<h2>Results</h2><p><b>Best setup:</b> ${esc(r.best)} ${best ? esc(JSON.stringify(best.params)) : ""}</p>
-    <div id="rsetups"></div>${Object.keys(r.factors).map(f => `<h2>By ${esc(f)}</h2><div id="rf-${esc(f)}"></div>`).join("")}
-    ${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}`;
-}
-
-const statCols = (first, key) => [
-  first,
-  {label: "total", num: true, get: s => s.total.mean}, {label: "low", num: true, get: s => s.total.low},
-  {label: "high", num: true, get: s => s.total.high}, {key: "pass_rate", label: "pass rate", num: true},
-  {key: "wins", label: "wins", num: true}, {key: "errors", label: "errors", num: true},
-];
-
-async function showExperiment(eid) {
-  const x = await get(`/api/experiments/${eid}`);
+  const answer = best ? `<div class="card answer"><div class="muted">The answer</div><div class="big">${chips(best.params)}</div>
+    <div class="muted">Mean total <b style="color:var(--text)">${fmt(best.total.mean)}</b> (95% interval ${fmt(best.total.low)} to ${fmt(best.total.high)}) · wins ${best.wins} of ${x.plan.cases.length} cases · pass rate ${pct(best.pass_rate)}</div>
+    ${Object.entries(r.baselines).map(([b, diffs]) => diffs[r.best] ? `<div class="muted" style="margin-top:4px">Against baseline <b>${esc(b)}</b>: ${signed(diffs[r.best].diff)} ${diffs[r.best].clear ? `<span class="pill ok">clearly better</span>` : `<span class="pill">not a clear difference</span>`}</div>` : `<div class="muted" style="margin-top:4px">The baseline <b>${esc(b)}</b> is the best setup.</div>`).join("")}</div>` : "";
+  const charts = Object.entries(r.factors).map(([f, levels]) => factorChart(f, levels)).join("");
   const humans = Object.keys(x.human || {});
-  main.innerHTML = `<h2>${esc(x.eid)}: ${esc(x.title)} ${badge(x.status)}</h2><p>${esc(x.question)}</p>
-    ${x.changed_since_plan ? `<p class="bad">The definition changed since the plan: plan it again before it can be approved.</p>` : ""}
-    ${reviewBox(x)}
-    ${x.reviews.length ? `<h2>Reviews</h2><div id="rev"></div>` : ""}
-    <h2>Plan</h2>${planView(x)}
-    ${humans.length ? `<h2>Rate</h2>${humans.map(h => `<a href="#/rate/${esc(x.eid)}/${esc(h)}">Rate: ${esc(x.human[h].question)}</a>`).join("<br>")}` : ""}
-    ${resultsView(x)}
-    <h2>Samples (${x.samples.length} of ${x.outputs ?? "?"})</h2><p class="muted">Click a sample for its output and files.</p><div id="smp"></div>
-    <details><summary>experiment.toml</summary><pre>${esc(x.definition)}</pre></details>`;
-  if (x.status === "proposed") {
-    const decide = async decision => {
-      try { await send(`/api/experiments/${eid}/review`, {decision, note: document.getElementById("note").value}); route(); }
-      catch (e) { document.getElementById("rmsg").textContent = e.message; }
-    };
-    document.getElementById("approve").onclick = () => decide("approve");
-    document.getElementById("deny").onclick = () => decide("deny");
-  }
-  if (x.reviews.length) table(document.getElementById("rev"), [{key: "decision", label: "decision"}, {key: "by", label: "by"},
-    {key: "at", label: "at"}, {key: "note", label: "note"}], x.reviews);
-  const factors = Object.keys(x.factors);
-  if (x.plan) table(document.getElementById("setups"), [{key: "id", label: "setup"}, ...factors.map(f => ({label: f, get: s => s[f]}))],
-    Object.entries(x.plan.setups).map(([id, s]) => ({id, ...s})));
-  if (x.results) {
-    const r = x.results;
-    table(document.getElementById("rsetups"), [...statCols({key: "id", label: "setup"}),
-      ...factors.map(f => ({label: f, get: s => s.params[f]}))], r.ranking.map(id => ({id, ...r.setups[id]})));
-    for (const [f, levels] of Object.entries(r.factors))
-      table(document.getElementById(`rf-${f}`), statCols({key: "level", label: f}), Object.entries(levels).map(([level, s]) => ({level, ...s})));
-    for (const [b, diffs] of Object.entries(r.baselines))
-      table(document.getElementById(`rb-${b}`), [{key: "id", label: "setup"}, {key: "diff", label: "difference", num: true},
-        {key: "low", label: "low", num: true}, {key: "high", label: "high", num: true}, {label: "clear", get: v => v.clear ? "yes" : "no"}],
-        Object.entries(diffs).map(([id, v]) => ({id, ...v})));
-  }
-  const scoreNames = [...new Set(x.samples.flatMap(s => Object.keys(s.scores)))];
-  const measureNames = [...new Set(x.samples.flatMap(s => Object.keys(s.measurements)))];
-  const cols = [{key: "case", label: "case"}, ...factors.map(f => ({label: f, get: s => s.params[f]})),
-    {key: "total", label: "total", num: true}, ...scoreNames.map(n => ({label: n, num: true, get: s => s.scores[n] ?? null})),
-    ...measureNames.map(n => ({label: n, num: true, get: s => s.measurements[n] ?? null})),
-    {label: "winner", get: s => s.winner ? "★" : ""}, {key: "error", label: "error"}];
-  table(document.getElementById("smp"), cols, x.samples, async (s, tr) => {
-    if (tr.nextSibling && tr.nextSibling.classList.contains("detail")) { tr.nextSibling.remove(); return; }
-    const [c, setup, k] = s.sample_id.split("__");
-    const base = `outputs/${c}/${setup}/${k}/files`;
-    const res = await fetch(`/files/${eid}/outputs/${c}/${setup}/${k}/result.json`).then(r => r.ok ? r.json() : null).catch(() => null);
-    const d = document.createElement("tr");
-    d.className = "detail";
-    const files = res ? Object.keys(res.files || {}) : [];
-    d.innerHTML = `<td colspan="${cols.length}"><b>${esc(s.sample_id)}</b>${res ? `<pre>${esc(flat(res.data))}</pre>
-      ${files.map(n => fileView(eid, base, n)).join("")}${res.log ? `<details><summary>log</summary><pre>${esc(res.log)}</pre></details>` : ""}` : ""}
-      <details><summary>scores and measurements</summary><pre>${esc(JSON.stringify({scores: s.scores, measurements: s.measurements, human: s.human}, null, 2))}</pre></details></td>`;
-    tr.after(d);
-  });
+  return tiles + answer + (charts ? `<h2>Which value of each setting wins</h2><div class="cards">${charts}</div>` : "") +
+    (humans.length ? `<h2>Your ratings</h2><div class="cards">${humans.map(h => `<div class="card row"><div><b>${esc(x.human[h].question)}</b><div class="muted">${esc(h)} · scale ${x.human[h].scale.join("–")}</div></div><a class="btn primary" href="#/rate/${esc(x.eid)}/${esc(h)}">Rate</a></div>`).join("")}</div>` : "");
 }
-
+function resultsTab(x, el) {
+  const r = x.results;
+  if (!r) { el.innerHTML = `<div class="card empty">No results yet.</div>`; return; }
+  const factors = Object.keys(x.factors), crit = [...new Set(Object.values(r.setups).flatMap(s => Object.keys(s.criteria)))];
+  const max = Math.max(...Object.values(r.setups).map(s => s.total.high ?? s.total.mean ?? 0), 0.0001);
+  el.innerHTML = `<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
+    ${Object.keys(r.agreement || {}).length ? `<h2>Judge agreement</h2><div class="card kv">${Object.entries(r.agreement).map(([k, v]) => `<span>${esc(k)}</span><span>mean difference ${fmt(v)}</span>`).join("")}</div>` : ""}`;
+  table($("rs"), [
+    ...factors.map(f => ({label: f, get: s => s.params[f]})),
+    {label: "Total (95% interval)", num: true, get: s => s.total.mean, html: s => scorebar(s.total.mean, {low: s.total.low, high: s.total.high, win: s.id === r.best, max})},
+    {key: "wins", label: "Wins", num: true}, {key: "pass_rate", label: "Pass rate", num: true, html: s => esc(pct(s.pass_rate))},
+    {key: "errors", label: "Errors", num: true},
+    ...crit.map(c => ({label: c, num: true, get: s => s.criteria[c], html: s => scorebar(s.criteria[c])})),
+  ], r.ranking.map(id => ({id, ...r.setups[id]})), {rowClass: s => s.id === r.best ? "win" : ""});
+  for (const [b, diffs] of Object.entries(r.baselines))
+    table($(`rb-${b}`), [...factors.map(f => ({label: f, get: s => r.setups[s.id].params[f]})),
+      {key: "diff", label: "Difference", num: true, html: s => esc(signed(s.diff))},
+      {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`}],
+      Object.entries(diffs).map(([id, v]) => ({id, ...v})));
+}
+async function sampleDrawer(x, s) {
+  const [c, setup, k] = s.sample_id.split("__");
+  const base = `outputs/${c}/${setup}/${k}/files`;
+  const res = await fetch(`/files/${encodeURIComponent(x.eid)}/outputs/${c}/${setup}/${k}/result.json`).then(r => r.ok ? r.json() : null).catch(() => null);
+  const files = res ? Object.keys(res.files || {}) : [];
+  openDrawer(s.sample_id, `<div style="margin:14px 0">${chips(s.params)} ${s.winner ? `<span class="pill accent">case winner</span>` : ""} ${s.error ? `<span class="pill bad">error</span>` : ""}</div>
+    ${s.error ? `<pre style="color:var(--bad)">${esc(s.error)}</pre>` : ""}
+    ${res && res.data !== null && res.data !== undefined ? `<h2>Output</h2>${outputView(res.data)}` : ""}
+    ${files.length ? `<h2>Files</h2>${files.map(n => fileView(x.eid, base, n)).join("")}` : ""}
+    <h2>Scores</h2><div class="kv">${Object.entries(s.scores).map(([n, v]) => `<span>${esc(n)}</span><span>${scorebar(v)}</span>`).join("")}<span>total</span><span>${scorebar(s.total, {win: s.winner})}</span></div>
+    <h2>Measurements</h2><div class="kv">${Object.entries(s.measurements).map(([n, v]) => `<span>${esc(n)}</span><span>${esc(fmt(v))}</span>`).join("")}</div>
+    ${res?.log ? `<details><summary>Log</summary><pre>${esc(res.log)}</pre></details>` : ""}`);
+}
+function samplesTab(x, el) {
+  const factors = Object.keys(x.factors);
+  const scores = [...new Set(x.samples.flatMap(s => Object.keys(s.scores)))].filter(n => n !== "ran_ok");
+  el.innerHTML = `<p class="muted" style="margin-top:0">Every output. Click one for its text, files (images, audio and video play here), scores, measurements and log.</p><div id="smp"></div>`;
+  table($("smp"), [{key: "case", label: "Case"}, ...factors.map(f => ({label: f, get: s => s.params[f]})),
+    {key: "total", label: "Total", num: true, html: s => scorebar(s.total, {win: s.winner})},
+    ...scores.map(n => ({label: n, num: true, get: s => s.scores[n] ?? null, html: s => scorebar(s.scores[n] ?? null)})),
+    {label: "Time (s)", title: "measured seconds", num: true, get: s => s.measurements.seconds ?? null},
+    {label: "Status", get: s => s.error ? "error" : s.winner ? "winner" : "", html: s => s.error ? `<span class="pill bad" title="${esc(s.error)}">error</span>` : s.winner ? `<span class="pill accent">winner</span>` : ""}],
+    x.samples, {onRow: s => sampleDrawer(x, s), rowClass: s => s.winner ? "win" : "", empty: "No outputs yet."});
+}
+function planTab(x, el) {
+  const p = x.plan;
+  if (!p) { el.innerHTML = `<div class="card callout"><div class="muted">No plan yet.</div>${cmd(`hone-select experiments plan ${x.eid}`)}</div>`; return; }
+  const e = p.estimate;
+  el.innerHTML = `<div class="grid">${[tile("Outputs", fmt(p.outputs), `${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples}`), tile("Judge calls", fmt(p.judge_calls)),
+      tile("Estimated time", e.seconds === null ? "—" : duration(e.seconds)), tile("Estimated cost", e.money_usd === null ? "—" : "$" + fmt(e.money_usd)), tile("Subject", esc(p.subject))].join("")}</div>
+    <p class="muted">Estimate: ${esc(e.from)}. Planned ${esc(when(p.planned_at))}.</p>
+    <h2>What runs</h2>${p.commands.map(c => `<pre>${esc(c)}</pre>`).join("")}
+    <h2>Setups</h2><div id="ps"></div><h2>Test cases</h2><div class="card">${p.cases.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>`;
+  const factors = Object.keys(x.factors), bases = new Set(Object.values(p.baselines));
+  table($("ps"), [{key: "id", label: "Setup", html: s => `<span class="mono">${esc(s.id)}</span>${bases.has(s.id) ? ` <span class="pill info">baseline</span>` : ""}`},
+    ...factors.map(f => ({label: f, get: s => s[f]}))], Object.entries(p.setups).map(([id, s]) => ({id, ...s})));
+}
+async function showExperiment(eid, tab) {
+  const x = await get(`/api/experiments/${eid}`);
+  const tabs = [["overview", "Overview"], ["results", "Results"], ["samples", "Samples", x.samples.length], ["plan", "Plan"], ["definition", "Definition"], ["reviews", "Reviews", x.reviews.length]];
+  tab = tabs.some(([k]) => k === tab) ? tab : "overview";
+  main.innerHTML = head(esc(x.title), esc(x.question), `<a href="#/experiments">Experiments</a> / <span class="mono">${esc(x.eid)}</span>`, pill(x.status)) + nextStep(x) +
+    `<div class="tabs" role="tablist">${tabs.map(([k, label, n]) => `<a role="tab" class="${k === tab ? "active" : ""}" href="#/experiment/${esc(x.eid)}/${k}">${label}${n ? `<span class="count">${n}</span>` : ""}</a>`).join("")}</div><div id="tab"></div>`;
+  const el = $("tab");
+  if (tab === "overview") el.innerHTML = overview(x);
+  else if (tab === "results") resultsTab(x, el);
+  else if (tab === "samples") samplesTab(x, el);
+  else if (tab === "plan") planTab(x, el);
+  else if (tab === "definition") el.innerHTML = `<p class="muted" style="margin-top:0">The definition as written (values of secret-named keys are hidden).</p><pre style="max-height:none">${esc(x.definition)}</pre>`;
+  else el.innerHTML = x.reviews.length ? `<div class="card">${x.reviews.slice().reverse().map(r => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--border)"><div>${pill(r.decision)} <b>${esc(r.by)}</b> <span class="muted">${esc(r.note || "")}</span></div><span class="muted">${esc(when(r.at))}</span></div>`).join("")}</div>` : `<div class="card empty">No decisions yet.</div>`;
+  if (x.status === "proposed" && x.plan) {
+    const decide = async decision => {
+      try { await send(`/api/experiments/${x.eid}/review`, {decision, note: $("note").value}); toast(decision === "approve" ? "Approved" : "Denied"); route(); }
+      catch (e) { toast(e.message); }
+    };
+    $("approve").onclick = () => decide("approve"); $("deny").onclick = () => decide("deny");
+  }
+  if (x.status === "running") refresh = setTimeout(route, 4000);
+}
 async function showRate(eid, criterion) {
   const o = await get(`/api/experiments/${eid}/rate/${criterion}`);
-  if (!o) { main.innerHTML = `<h2>Everything is rated for ${esc(criterion)}.</h2><p><a href="#/experiment/${esc(eid)}">Back to ${esc(eid)}</a>; run <code>hone-select experiments report ${esc(eid)}</code> to include the ratings.</p>`; return; }
-  const [low, high] = o.scale;
-  const buttons = Array.from({length: high - low + 1}, (_, i) => low + i).map(v => `<button data-v="${v}" style="min-width:44px">${v}</button>`).join(" ");
-  main.innerHTML = `<h2>${esc(o.question)}</h2><p class="muted">${esc(eid)} · ${esc(criterion)} · ${o.total - o.remaining + 1} of ${o.total} · the setup is hidden</p>
-    <div class="card"><div class="muted">case ${esc(o.case)}</div>${o.data !== null && o.data !== undefined ? `<pre>${esc(flat(o.data))}</pre>` : ""}
-    ${o.files.map(n => fileView(eid, o.file_base, n)).join("")}</div>
-    <div class="bar">${esc(low)} = worst ${buttons} ${esc(high)} = best <span id="msg" class="muted"></span></div>
-    <p><a href="#/experiment/${esc(eid)}">Back to ${esc(eid)}</a></p>`;
-  main.querySelectorAll("button[data-v]").forEach(b => b.onclick = async () => {
-    try { await send(`/api/experiments/${eid}/rate`, {sample_id: o.sample_id, criterion, value: Number(b.dataset.v)}); route(); }
-    catch (e) { document.getElementById("msg").textContent = e.message; }
-  });
+  const crumbs = `<a href="#/experiments">Experiments</a> / <a href="#/experiment/${esc(eid)}">${esc(eid)}</a> / rate`;
+  if (!o) {
+    main.innerHTML = head("Everything is rated", `Every output has a rating for ${esc(criterion)}. Recompute the results to include them.`, crumbs) +
+      `<div class="card callout ok"><div class="muted">Include the ratings in the results:</div>${cmd(`hone-select experiments report ${eid}`)}</div>`;
+    return;
+  }
+  const [low, high] = o.scale, done = o.total - o.remaining;
+  main.innerHTML = `<div class="rate">${head(esc(o.question), "Which setup made it is hidden: rate what you see.", crumbs)}
+    <div class="row muted" style="margin-bottom:6px"><span>${done + 1} of ${o.total}</span><span>case <b>${esc(o.case)}</b></span></div>${progress(done, o.total)}
+    <div class="card" style="margin-top:14px">${o.data !== null && o.data !== undefined ? outputView(o.data) : ""}${o.files.map(n => fileView(eid, o.file_base, n)).join("")}</div>
+    <div class="scale">${Array.from({length: high - low + 1}, (_, i) => low + i).map(v => `<button class="btn" data-v="${v}">${v}</button>`).join("")}</div>
+    <div class="row muted" style="font-size:12.5px"><span>${low} = worst</span><span>or press <span class="kbd">${low}</span>–<span class="kbd">${high}</span></span><span>${high} = best</span></div></div>`;
+  const rate = async v => {
+    try { await send(`/api/experiments/${eid}/rate`, {sample_id: o.sample_id, criterion, value: v}); route(); }
+    catch (e) { toast(e.message); }
+  };
+  main.querySelectorAll("button[data-v]").forEach(b => b.onclick = () => rate(Number(b.dataset.v)));
+  document.onkeydown = e => { const v = Number(e.key); if (e.key.length === 1 && v >= low && v <= high) rate(v); };
 }
 
+// ---- routing ---------------------------------------------------------------------------------------
 async function route() {
-  const hash = location.hash || "#/";
-  document.getElementById("status").textContent = "loading…";
+  clearTimeout(refresh); closeDrawer(); document.onkeydown = null;
+  const hash = location.hash || "#/experiments";
+  const section = hash.startsWith("#/run") ? "runs" : hash.startsWith("#/candidates") ? "candidates" : "experiments";
+  document.querySelectorAll("[data-nav]").forEach(a => a.classList.toggle("active", a.dataset.nav === section));
   try {
-    if (hash.startsWith("#/run/")) await showRun(decodeURIComponent(hash.slice(6)));
+    if (hash.startsWith("#/runs")) await showRuns();
+    else if (hash.startsWith("#/run/")) await showRun(decodeURIComponent(hash.slice(6)));
     else if (hash.startsWith("#/candidates")) await showCandidates();
-    else if (hash.startsWith("#/experiments")) await showExperiments();
-    else if (hash.startsWith("#/experiment/")) await showExperiment(decodeURIComponent(hash.slice(13)));
+    else if (hash.startsWith("#/experiment/")) { const [eid, tab] = hash.slice(13).split("/").map(decodeURIComponent); await showExperiment(eid, tab); }
     else if (hash.startsWith("#/rate/")) await showRate(...hash.slice(7).split("/").map(decodeURIComponent));
-    else await showRuns();
-    document.getElementById("status").textContent = "";
+    else await showExperiments();
   } catch (e) {
-    main.innerHTML = `<pre class="bad">${esc(e.message)}</pre>`;
-    document.getElementById("status").textContent = "";
+    main.innerHTML = head("Something went wrong") + `<div class="card callout bad"><div>${esc(e.message)}</div><a class="btn" href="#/experiments">Back to experiments</a></div>`;
   }
+  window.scrollTo(0, 0);
 }
+get("/api/info").then(i => {
+  $("source").innerHTML = `<div><b>Store</b></div><div class="mono">${esc(i.store)}${i.store_exists ? "" : " (none yet)"}</div>` +
+    (i.project ? `<div style="margin-top:6px"><b>Project</b></div><div class="mono">${esc(i.project)}</div>` : "");
+}).catch(() => {});
 window.onhashchange = route;
 route();
 </script>

@@ -151,6 +151,11 @@ def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str
     assert json.loads(body)["task"] == "a song"
     assert len(json.loads(fetch(server + "/api/candidates")[2])) == 8
     assert fetch(server + "/api/runs/nope")[0] == 404
+    status, _, body = fetch(server + "/api/info")
+    info = json.loads(body)
+    assert status == 200
+    assert info["store_exists"] is True
+    assert info["project"] is None
     assert fetch(server + "/nothing")[0] == 404
 
 

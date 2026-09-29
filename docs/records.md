@@ -106,19 +106,26 @@ scorer objects are registered. `--json` prints `run_id`, `trace_id`, `winner`, `
 
 ## The dashboard
 
-`hone-select dashboard` (extra `cli`) serves a small read-only web page over the span store, on
-`http://127.0.0.1:8788/` by default (`--port`, `--host`, `--db`, `--open`):
+`hone-select dashboard` (extra `cli`) serves a local web page over the span store and the project's
+experiments, on `http://127.0.0.1:8788/` by default (`--port`, `--host`, `--db`, `--project`, `--open`). A
+sidebar leads to three sections; the page follows the system's light or dark theme and works on a phone.
 
-- **Runs:** every run, newest first, with its policy, n, candidates, rejected, winner and total,
-  fallback / escalation, duration and the trace context it ran in (`hone.run_id`, `hone.item`, `hone.step`).
-  Type in the box above the table to filter every column, or in a column's own box; click a header to sort.
-- **A run:** what was tested (the configuration and the task), the budget used, and the candidate table:
-  variation params as columns, each gate's result, one column per scorer, total, rank, stage reached,
-  rejected and the winner (highlighted). Click a candidate for its data preview, gate details and every
-  score's reason or error. Pairwise judgements and the decision trace follow.
-- **Candidates across runs:** every candidate of every run in one table; *Compare by* a variation param
-  (for example `model`) gives candidates, wins, win rate and mean total per value, over the rows your
-  filters keep. This is how an experiment that varies models, temperatures or prompts is read.
+- **Experiments** (the start page): one card per experiment with its status, question and progress; a
+  badge counts the plans waiting for your decision. An experiment opens on its **Overview**: the next
+  step (the decision, or the command to copy), progress, errors, time and cost, **the answer** (the best
+  setup, its interval, wins and its difference to the baseline) and one chart per setting showing which
+  value wins. Tabs hold the **Results** tables, every **Sample** (click one for its output, files, scores,
+  measurements and log), the **Plan** (what runs, estimates, setups), the **Definition** and the
+  **Reviews**. A running experiment refreshes itself.
+- **Runs:** every selection, newest first, with where it ran (`hone.run_id`, `hone.item`, `hone.step`),
+  policy, candidates, the winner's total, fallback / escalation, duration and status. A run shows what was
+  tested, the budget, and its candidates best first with gates, one score bar per scorer and the total;
+  click a candidate for its output, gate details and every score's reason or error.
+- **Candidates:** every candidate of every run; *Compare by* a varied setting (for example `model`) draws
+  each value's win rate over the candidates the table keeps.
+
+Every table has one search box, per-column filters behind **Filters**, and sortable headers; details open
+in a side panel (`Esc` closes it). `/api/info` names the store and project the page reads.
 
 The same data is available in Python:
 

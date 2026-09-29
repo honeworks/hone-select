@@ -15,6 +15,9 @@ changes found in the demo apps: [0003](design/changes/0003-name-a-position-biase
 [0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md).
 
 ### Added (from the demo apps)
+- A redesigned dashboard: sidebar navigation, light and dark themes, experiment cards, an Overview that
+  leads with the answer and a chart per setting, search / filter / sort on every table, details in a side
+  panel, a keyboard-friendly rating screen, and `GET /api/info` (design/decisions.md D-012).
 - Experiments (`hone_select.experiments`, `hone-select experiments ...`): declare a comparison of setups
   (factors, a baseline) over test cases; the subject is a prompt, a Python function or any command; a plan
   with every run and an estimate that a person approves (CLI or the dashboard's Experiments page);
