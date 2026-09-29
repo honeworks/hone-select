@@ -74,13 +74,13 @@ def _as_json(guide: Any, model_id: str) -> dict[str, Any]:
     """hone-models' ``ModelGuide.as_dict()`` (or a plain mapping), with its text; ``install`` becomes the
     one command a person runs (``hone-models models install <id>``) and the steps it prints are kept as
     ``install_commands``."""
+    as_text: Any = getattr(guide, "as_text", None)
     out = dict(cast(Mapping[str, Any], guide)) if isinstance(guide, Mapping) else dict(guide.as_dict())
-    as_text = getattr(guide, "as_text", None)
     if callable(as_text):
         out.setdefault("text", str(as_text()))
     steps = out.get("install")
     if isinstance(steps, list):
-        out["install_commands"] = steps
+        out["install_commands"] = [str(s) for s in cast(list[Any], steps)]
     if not isinstance(steps, str):
         out["install"] = f"hone-models models install {model_id}"
     return out
