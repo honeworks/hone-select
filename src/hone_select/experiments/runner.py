@@ -147,24 +147,29 @@ def _generate(
         where = subjects.Where(root, folder, target.parent / "files")
         out = subjects.run_sample(spec, case, setup, seed, where)
         after = _after(guard, hook, spec, nxt=queue[0] if queue else None, setup=setup, need=need)
-        result = {
-            "sample_id": sample_id(case["id"], d.setup_id(setup), k),
-            "case": case["id"],
-            "case_fields": case["fields"],
-            "setup": d.setup_id(setup),
-            "params": setup,
-            "sample": k,
-            "seed": seed,
-            "at": now(),
-            **out,
-            "environment": guard.environment(before, after, attempt),
-        }
+        result = (
+            _record(case, setup, k, seed) | out | {"environment": guard.environment(before, after, attempt)}
+        )
         if not _keep(spec, target, result, attempt):
             queue.appendleft((case, setup, k, 2))  # set aside: it runs once more
         elif on_sample is not None:
             on_sample(result)
         before = after
     return True
+
+
+def _record(case: dict[str, Any], setup: dict[str, Any], k: int, seed: int) -> dict[str, Any]:
+    sid = d.setup_id(setup)
+    return {
+        "sample_id": sample_id(case["id"], sid, k),
+        "case": case["id"],
+        "case_fields": case["fields"],
+        "setup": sid,
+        "params": setup,
+        "sample": k,
+        "seed": seed,
+        "at": now(),
+    }
 
 
 def _after(

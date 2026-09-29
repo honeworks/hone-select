@@ -169,20 +169,16 @@ def compute(
     every = rows(folder, spec)
     rs = [r for r in every if include_outside or r["environment_status"] not in EXCLUDED]
     setups: dict[str, dict[str, Any]] = plan["setups"]
+
+    def stats(rows_: list[dict[str, Any]]) -> dict[str, Any]:
+        return _counted(rows_, spec, spec.seed, include_outside)
+
     per_setup = {
-        sid: {
-            "params": params,
-            **_counted([r for r in every if r["setup"] == sid], spec, spec.seed, include_outside),
-        }
+        sid: {"params": params, **stats([r for r in every if r["setup"] == sid])}
         for sid, params in setups.items()
     }
     per_factor = {
-        f: {
-            str(level): _counted(
-                [r for r in every if r["params"].get(f) == level], spec, spec.seed, include_outside
-            )
-            for level in levels
-        }
+        f: {str(level): stats([r for r in every if r["params"].get(f) == level]) for level in levels}
         for f, levels in spec.factors.items()
     }
     ranked = sorted(per_setup, key=lambda s: -(per_setup[s]["total"]["mean"] or -1e9))

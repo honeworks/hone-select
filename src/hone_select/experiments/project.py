@@ -122,13 +122,7 @@ class Project:
         if pilot:
             with guard.pilot(spec, folder, needs.needed(spec, cases[0], setups[0]), src):
                 sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
-            plan["pilot"] = sample
-            per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
-            plan["estimate"] = {
-                "seconds": round(per_s * outputs, 1),
-                "money_usd": round(per_usd * outputs, 4) if per_usd is not None else None,  # unknown, not $0
-                "from": "one pilot sample (generation only; judges not included)",
-            }
+            plan |= {"pilot": sample, "estimate": _estimate(sample, outputs)}
         write_json(folder / "plan.json", plan)
         return plan
 
@@ -186,6 +180,15 @@ class Project:
 
     def list(self) -> list[dict[str, Any]]:
         return [self.status(eid) for eid in self.eids()]
+
+
+def _estimate(sample: dict[str, Any], outputs: int) -> dict[str, Any]:
+    per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
+    return {
+        "seconds": round(per_s * outputs, 1),
+        "money_usd": round(per_usd * outputs, 4) if per_usd is not None else None,  # unknown, not $0
+        "from": "one pilot sample (generation only; judges not included)",
+    }
 
 
 def _run_state(run: dict[str, Any]) -> str:
