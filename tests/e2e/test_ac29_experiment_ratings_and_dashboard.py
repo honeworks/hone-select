@@ -103,6 +103,10 @@ PAGE = {"X-Hone-Dashboard": "1", "Content-Type": "application/json"}
 
 def test_ac29_dashboard_lists_shows_and_reviews(served: tuple[str, Path]) -> None:
     base, _ = served
+    status, info = call(base + "/api/info")
+    assert status == 200
+    assert info["project"] == str(served[1])
+    assert info["store_exists"] is False  # a project with experiments needs no span store yet
     status, rows = call(base + "/api/experiments")
     assert status == 200
     assert [(r["eid"], r["status"]) for r in rows] == [("E0001", "completed"), ("E0002", "proposed")]

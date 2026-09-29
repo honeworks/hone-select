@@ -2,6 +2,7 @@
 gates, scores, winner), compares candidates across runs, and serves it all read-only over HTTP."""
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -12,7 +13,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from hone_select import Candidate, Engine, HoneSelectError, gate, generator, scorer
+from hone_select import Candidate, Engine, HoneSelectError, __version__, gate, generator, scorer
 from hone_select.cli import app
 from hone_select.dashboard import all_candidates, list_runs, make_server, run_detail
 
@@ -140,7 +141,7 @@ def fetch(url: str) -> tuple[int, str, bytes]:
         return e.code, e.headers["Content-Type"], e.read()
 
 
-def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str]) -> None:
+def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str], hone_home: Path) -> None:
     status, kind, body = fetch(server + "/")
     assert status == 200
     assert kind.startswith("text/html")
@@ -154,8 +155,12 @@ def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str
     status, _, body = fetch(server + "/api/info")
     info = json.loads(body)
     assert status == 200
-    assert info["store_exists"] is True
-    assert info["project"] is None
+    assert info == {
+        "store": str(store(hone_home)),
+        "store_exists": True,
+        "project": None,
+        "version": __version__,
+    }
     assert fetch(server + "/nothing")[0] == 404
 
 
@@ -342,3 +347,18 @@ def test_ac24_query_strings_and_error_bodies(server: str, two_runs: list[str]) -
     assert kind == "application/json"
     assert "no run 'nope'" in json.loads(body)["error"]
     assert json.loads(fetch(server + "/nothing")[2]) == {"error": "not found"}
+
+
+PAGE_CALL = re.compile(r"""(?:get|fetch)\(`?"?(/(?:api|files)/[^"`)$]*)""")
+
+
+def test_ac24_every_endpoint_the_page_calls_is_served(server: str, two_runs: list[str]) -> None:
+    """The page cannot be tested without a browser; at least every API path its code calls must exist."""
+    page = fetch(server + "/")[2].decode()
+    called = {m.rstrip("/") for m in PAGE_CALL.findall(page)}
+    assert called >= {"/api/info", "/api/runs", "/api/candidates", "/api/experiments", "/files"}
+    run_id = two_runs[0]
+    for path in ("/api/info", "/api/runs", f"/api/runs/{run_id}", "/api/candidates"):
+        assert fetch(server + path)[0] == 200, path
+    for view in ("showExperiments", "showExperiment", "showRuns", "showRun", "showCandidates", "showRate"):
+        assert f"function {view}(" in page  # every view the router names is defined

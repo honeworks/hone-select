@@ -616,7 +616,9 @@ store; `show` prints every span of the run's trace. Errors print one `error: ...
 total, rank and winner, every reason on click, pairwise judgements, decision trace) and all candidates
 across runs with a group-by on any variation param (candidates, wins, win rate, mean total). The server is
 the standard library's `http.server` on localhost; `hone_select.dashboard.list_runs`, `run_detail` and
-`all_candidates` return the same data as JSON-ready values.
+`all_candidates` return the same data as JSON-ready values. `GET /api/info` returns `store` (the span
+store path), `store_exists`, `project` (the experiments folder's project, or null) and `version`, for the
+page's sidebar. The page's layout is design/decisions.md D-012.
 
 ## 10. Acceptance cases
 
@@ -648,7 +650,7 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 | AC-21 | Examples | every `examples/*.py` runs offline, opens with a What / How / Why docstring and is listed in `examples/README.md` |
 | AC-22 | `Engine.select` on existing candidates | returns a `Result`: winner, ranking, the decision trace (dedup with `duplicate_of`, the embedder-failure warning), `run_id` that `explain_run` finds, budget; `score()` equals `select().ranked` |
 | AC-23 | A gate returns `details` (a `GateResult` or a GateLike mapping) | kept in `Scored.gates[name].details`, also for rejected candidates; recorded as `hone.select.gate.details` on the gate span, hashed when content capture is off |
-| AC-24 | The dashboard over a store with two runs in one trace | lists both runs newest first with policy, n, candidates, winner and trace context; a run shows its configuration, task and every candidate with variation params, gate results and scores; candidates across runs carry their params; the task is hashed when content capture is off; the server answers `/`, `/api/runs`, `/api/runs/<id>`, `/api/candidates` and 404s unknown paths |
+| AC-24 | The dashboard over a store with two runs in one trace | lists both runs newest first with policy, n, candidates, winner and trace context; a run shows its configuration, task and every candidate with variation params, gate results and scores; candidates across runs carry their params; the task is hashed when content capture is off; the server answers `/`, `/api/info` (store, store_exists, project, version), `/api/runs`, `/api/runs/<id>`, `/api/candidates` and 404s unknown paths |
 | AC-25 | An experiment's lifecycle | `new` creates `experiments/E000N-slug/` with a valid template; `plan` expands every setup (full / one_at_a_time / list, baselines first), counts outputs, shows the exact commands, estimates only with `--pilot`; a person approves or denies a plan for one definition hash; `start` refuses anything but an approved current plan; an edited definition is a draft again; the CLI does all of it |
 | AC-26 | Experiment subjects | prompt, python and command subjects; every sample records data, files, seconds, peak memory, exit code, log; an exception, a non-zero exit, a timeout, a missing program or non-JSON output is a recorded error, never a crash; `TransientError` / exit 75 is retried |
 | AC-27 | Running and results | a stopped run resumes without redoing samples; the budget stops it; each case is a selection recorded with `hone.run_id = EID` and `hone.item = case`; results per setup, factor level and baseline find the known best setup, with intervals, wins and pass rates; `keep_files` and scorer agreement as declared |
