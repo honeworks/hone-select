@@ -4,7 +4,6 @@ a fake clock whose sleeps pass instantly, and states that change per reading or 
 from __future__ import annotations
 
 import json
-import os
 import stat
 import sys
 from collections.abc import Callable
@@ -133,11 +132,3 @@ def results_of(folder: Path) -> list[dict[str, Any]]:
 
 def run_json(folder: Path) -> dict[str, Any]:
     return json.loads((folder / "run.json").read_text())
-
-
-def pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
