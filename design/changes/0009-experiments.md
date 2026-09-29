@@ -234,7 +234,7 @@ reason. After the cases, the results are computed:
 
 Resume needs no workflow engine: a cell is done when its output file exists, and `start` skips done cells.
 hone-select stays useful alone (no hone-flow dependency). Model clients stay behind the existing ports
-(`TextClient`, `DecisionClient`), so local models, AvalAI and fakes work the same way; `order = "by_model"`
+(`TextClient`, `DecisionClient`), so local models, hosted APIs and fakes work the same way; `order = "by_model"`
 lets a local client load one model at a time.
 
 ### 5. In the dashboard

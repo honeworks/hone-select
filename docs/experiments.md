@@ -106,7 +106,7 @@ raises `hone_select.experiments.TransientError`, a command exits with code 75); 
 `["scripts/gpu-lock.sh"]`); `env`; `keep_files` (`all`, `small`, `none`). Python subjects and commands run
 from the project root; python subjects run in their own process.
 
-**Secrets:** name them in `env` with `$VAR` (`env = { API_KEY = "$AVALAI_API_KEY" }`): the subject gets the
+**Secrets:** name them in `env` with `$VAR` (`env = { API_KEY = "$OPENAI_API_KEY" }`): the subject gets the
 value from your environment and the definition never contains it. Logs and errors are scrubbed of
 anything that looks like a key, and the dashboard shows the definition with the values of secret-named
 keys as `***`.
