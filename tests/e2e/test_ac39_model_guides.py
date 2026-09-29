@@ -203,7 +203,7 @@ def test_ac39_without_the_extra_a_declared_guides_is_a_config_error(
     (tmp_path / "bad").mkdir()
     p, _ = project(tmp_path / "bad", SONGS.replace("tests.e2e.fake_media:guides", "nope"), CASES)
     with pytest.raises(
-        ConfigError, match=r"guides 'nope' is neither an installed guide source \(\['hone_models:guides'"
+        ConfigError, match=r"guides 'nope' is neither an installed guide source \(\[.*'hone_models:guides'"
     ):
         p.plan("E0001")
     (tmp_path / "none").mkdir()

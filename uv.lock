@@ -342,7 +342,7 @@ wheels = [
 [[package]]
 name = "hone-models"
 version = "0.1.0"
-source = { git = "https://github.com/honeworks/hone-models?branch=main#5a84f4f5aa171c95bba86c99912c3eaa70b826ba" }
+source = { git = "https://github.com/honeworks/hone-models?branch=main#3ac9c0d73e044a8c247aa98de6301d98c96d0a7c" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
