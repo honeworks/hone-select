@@ -2,7 +2,7 @@
 
 ## Status
 
-`proposed` (2026-09-29). The owner chose A/B over ratings for the final say between close setups
+`accepted` (2026-09-29, owner: "Approve"; open questions take the proposed answers: 20 pairs, ties allowed). The owner chose A/B over ratings for the final say between close setups
 (story-room 0001, open question 3). Builds on [0009](0009-experiments.md) (human ratings, the dashboard).
 
 ## Context
