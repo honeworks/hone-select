@@ -16,6 +16,8 @@ from typing import Any, cast
 
 from hone_select._records import read_spans
 from hone_select.errors import HoneSelectError
+from hone_select.experiments import web
+from hone_select.experiments.project import Project
 
 __all__ = ["all_candidates", "list_runs", "make_server", "run_detail", "serve"]
 
@@ -230,15 +232,17 @@ def _page() -> bytes:
     return resources.files("hone_select").joinpath("dashboard.html").read_bytes()
 
 
-def _routes(db: Path) -> Callable[[str], tuple[int, str, bytes]]:
+def _routes(db: Path, project: Path | None) -> Callable[[str], tuple[int, str, bytes]]:
     def answer(path: str) -> tuple[int, str, bytes]:
         if path in ("/", "/index.html"):
             return 200, "text/html; charset=utf-8", _page()
+        if project is not None and (path.startswith(("/api/experiments", "/files/"))):
+            return web.get(Project(project), path)
         try:
             if path == "/api/runs":
-                data: Any = list_runs(db)
+                data: Any = list_runs(db) if db.exists() else []
             elif path == "/api/candidates":
-                data = all_candidates(db)
+                data = all_candidates(db) if db.exists() else []
             elif path.startswith("/api/runs/"):
                 data = run_detail(db, path.removeprefix("/api/runs/"))
             else:
@@ -250,21 +254,42 @@ def _routes(db: Path) -> Callable[[str], tuple[int, str, bytes]]:
     return answer
 
 
-def make_server(db: str | Path, host: str = "127.0.0.1", port: int = 8788) -> ThreadingHTTPServer:
-    """The dashboard server (not started): ``server.serve_forever()`` runs it; port 0 picks a free port."""
+def make_server(
+    db: str | Path, host: str = "127.0.0.1", port: int = 8788, project: str | Path | None = None
+) -> ThreadingHTTPServer:
+    """The dashboard server (not started): ``server.serve_forever()`` runs it; port 0 picks a free port.
+
+    ``project`` (a folder with ``experiments/``) adds the Experiments pages (design change 0009); the span
+    store may then be missing (no selection has run yet)."""
     store = Path(db)
-    if not store.exists():
-        raise HoneSelectError(f"no span store at {str(store)!r}; pass --db or set HONE_HOME")
-    answer = _routes(store)
+    root = Path(project).resolve() if project is not None else None
+    if not store.exists() and not (root is not None and web.has_experiments(root)):
+        raise HoneSelectError(
+            f"no span store at {str(store)!r} and no experiments; pass --db or --project, or set HONE_HOME"
+        )
+    answer = _routes(store, root)
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            status, kind, body = answer(self.path.split("?", 1)[0])
+        def _send(self, reply: tuple[int, str, bytes]) -> None:
+            status, kind, body = reply
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            self._send(answer(self.path.split("?", 1)[0]))
+
+        def do_POST(self) -> None:
+            host_header = self.headers.get("Host", "")
+            if root is None or not web.same_origin(self.headers, host_header):
+                self._send(
+                    (403, "application/json", b'{"error": "writes come from the dashboard page only"}')
+                )
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            self._send(web.post(Project(root), self.path.split("?", 1)[0], self.rfile.read(length)))
 
         def log_message(self, format: str, *args: Any) -> None:
             pass
@@ -277,9 +302,11 @@ def make_server(db: str | Path, host: str = "127.0.0.1", port: int = 8788) -> Th
         ) from e
 
 
-def serve(db: str | Path, host: str = "127.0.0.1", port: int = 8788) -> None:
+def serve(
+    db: str | Path, host: str = "127.0.0.1", port: int = 8788, project: str | Path | None = None
+) -> None:
     """Serve the dashboard until interrupted."""
-    server = make_server(db, host, port)
+    server = make_server(db, host, port, project)
     try:
         server.serve_forever()
     finally:

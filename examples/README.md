@@ -11,7 +11,7 @@ uv run python examples/quickstart.py     # or any file below
 ```
 
 They use only the public API: `hone_select`, `hone_select.testing`, `hone_select.ports`,
-`hone_select.adapters.*`, `hone_select.cache` and `hone_select.explain`. The Design column points to
+`hone_select.adapters.*`, `hone_select.cache`, `hone_select.explain` and `hone_select.experiments`. The Design column points to
 the sections of [`design/current.md`](../design/current.md) that define the behaviour. Read them in this
 order.
 
@@ -50,6 +50,11 @@ order.
 |---|---|---|---|
 | [`records_and_explain.py`](records_and_explain.py) | spans, trace context, `explain` | Join a caller's trace, query the SQLite store, re-explain a run later, keep private content out. | §8 |
 | [`cli_run_and_explain.py`](cli_run_and_explain.py) | `hone-select run / explain / show` | Run a selection from the shell with the files in [`cli/`](cli/) (extra `cli`). | §9.2 |
+
+## Experiments
+| File | Concept | What you learn | Design |
+|---|---|---|---|
+| [`experiments.py`](experiments.py) | `hone_select.experiments`: new, plan, approve, start, results | Compare setups (factors, a baseline) over test cases with a plan a person approves; read which setup and which factor level win. | §12 |
 
 ## With the rest of honeworks
 | File | Concept | What you learn | Design |

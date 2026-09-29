@@ -2,7 +2,7 @@
 
 ## Status
 
-`accepted` (approved by the owner 2026-09-29, with the answers in "Owner decisions" below). Revised
+`implemented in 0.1.0` (approved by the owner 2026-09-29, with the answers in "Owner decisions" below). Revised
 before approval: subjects that are code or programs, file inputs and outputs, measurements and the owner's
 ratings.
 

@@ -601,7 +601,9 @@ Adapters are imported lazily; the core never imports them.
 hone-select run CONFIG --task task.json --registry MODULE [--seed N] [--json]
 hone-select explain RUN_ID [--db PATH]
 hone-select show RUN_ID [--db PATH] [--json]
-hone-select dashboard [--db PATH] [--host 127.0.0.1] [--port 8788] [--open]
+hone-select dashboard [--db PATH] [--project PATH] [--host 127.0.0.1] [--port 8788] [--open]
+hone-select experiments new TITLE | plan EID [--pilot] | approve EID [--note] | deny EID --note
+hone-select experiments start EID | stop EID | status [EID] | list | report EID      (all: [--project PATH])
 ```
 
 `run` uses the top-level components of the registry module; `explain` rebuilds the decision from the
@@ -647,6 +649,11 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 | AC-22 | `Engine.select` on existing candidates | returns a `Result`: winner, ranking, the decision trace (dedup with `duplicate_of`, the embedder-failure warning), `run_id` that `explain_run` finds, budget; `score()` equals `select().ranked` |
 | AC-23 | A gate returns `details` (a `GateResult` or a GateLike mapping) | kept in `Scored.gates[name].details`, also for rejected candidates; recorded as `hone.select.gate.details` on the gate span, hashed when content capture is off |
 | AC-24 | The dashboard over a store with two runs in one trace | lists both runs newest first with policy, n, candidates, winner and trace context; a run shows its configuration, task and every candidate with variation params, gate results and scores; candidates across runs carry their params; the task is hashed when content capture is off; the server answers `/`, `/api/runs`, `/api/runs/<id>`, `/api/candidates` and 404s unknown paths |
+| AC-25 | An experiment's lifecycle | `new` creates `experiments/E000N-slug/` with a valid template; `plan` expands every setup (full / one_at_a_time / list, baselines first), counts outputs, shows the exact commands, estimates only with `--pilot`; a person approves or denies a plan for one definition hash; `start` refuses anything but an approved current plan; an edited definition is a draft again; the CLI does all of it |
+| AC-26 | Experiment subjects | prompt, python and command subjects; every sample records data, files, seconds, peak memory, exit code, log; an exception, a non-zero exit, a timeout, a missing program or non-JSON output is a recorded error, never a crash; `TransientError` / exit 75 is retried |
+| AC-27 | Running and results | a stopped run resumes without redoing samples; the budget stops it; each case is a selection recorded with `hone.run_id = EID` and `hone.item = case`; results per setup, factor level and baseline find the known best setup, with intervals, wins and pass rates; `keep_files` and scorer agreement as declared |
+| AC-28 | Experiment cases | from `cases.toml` fields, from one folder of files per case, or from an earlier experiment's winners or all outputs (its data and files as inputs); duplicate or missing cases are errors |
+| AC-29 | Ratings and the Experiments page | human criteria are rated blind in a fixed random order and join the results; the dashboard lists and shows experiments, approves or denies them, takes ratings and serves their files; writes without the page's header or from another origin, and paths outside `cases/` and `outputs/`, are refused |
 
 ## 11. Not in v0.1
 
@@ -658,3 +665,24 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 - **Known limitations:** `text_client` is accepted but unused; only the top level of a text client's
   `parsed` reply is checked against the schema (the emulated decision client checks each answer);
   `PromptPairwise` asks one order per call, so both orders are guaranteed only through the engine.
+
+## 12. Experiments
+
+Design change [0009](changes/0009-experiments.md); user guide [docs/experiments.md](../docs/experiments.md).
+An experiment is a folder `experiments/E000N-<slug>/` in a project: `experiment.toml` (title, question,
+cases, samples, seed, registry, `[generate]` subject, `[factors]`, `[design]`, `[[baseline]]`, `[criteria]`,
+`[judges.*]`, `[scorers.*]`, `[budget]`, `[run]`), `cases/`, `prompts/`, `scripts/`, and what hone-select
+writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `results/`.
+
+- **Status** comes from the files: draft (no plan, or the definition changed since), proposed, approved /
+  denied (the last decision on the current plan's definition hash), running / stopped / completed.
+- **Subjects:** `prompt` (a `TextClient` from a `module:factory`), `python` (`function(case, setup, ctx)` in
+  its own interpreter), `command` (any program, placeholders, JSON on stdin, `wait4` peak memory). A
+  failure is a result; the implicit gate `ran_ok` rejects it.
+- **Running:** samples in `run.order`, skipping done ones (resume), stopping at `STOP` or the budget; then one
+  selection per case (`Engine.select`) with the criteria (`measure` normalized over the experiment, human
+  criteria excluded), recorded in `.hone/select/spans.db` of the project.
+- **Results:** per setup, per factor level and against each baseline: mean total with a 95 % bootstrap
+  interval over cases, pass rate, errors, wins, criteria, measurements, money, human ratings; scorer
+  agreement for `compare` pairs. `hone_select.experiments` is the Python API (`Project`, `start`, `stop`,
+  `report`, `Ctx`, `TransientError`).

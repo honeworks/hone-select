@@ -12,9 +12,15 @@ First release. Design: [0001 initial design](design/changes/0001-initial-design.
 changes found in the demo apps: [0003](design/changes/0003-name-a-position-biased-pairwise-judge.md),
 [0004](design/changes/0004-gate-details.md), [0005](design/changes/0005-prompt-scorer-with-several-images.md),
 [0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md),
-[0008](design/changes/0008-dashboard.md).
+[0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md).
 
 ### Added (from the demo apps)
+- Experiments (`hone_select.experiments`, `hone-select experiments ...`): declare a comparison of setups
+  (factors, a baseline) over test cases; the subject is a prompt, a Python function or any command; a plan
+  with every run and an estimate that a person approves (CLI or the dashboard's Experiments page);
+  resumable runs with budgets; each case scored as a recorded selection; results per setup, factor level
+  and baseline with intervals; human criteria rated blind in the dashboard
+  ([design change 0009](design/changes/0009-experiments.md)).
 - `hone-select dashboard`: a read-only web page over the span store (runs, one run's configuration, task
   and candidate table, candidates across runs compared by variation param), and
   `hone_select.dashboard.list_runs` / `run_detail` / `all_candidates`. The `hone.select.run` span records

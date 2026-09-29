@@ -129,5 +129,9 @@ runs = list_runs(".hone/select/spans.db")  # newest first
 detail = run_detail(".hone/select/spans.db", runs[0]["run_id"]) if runs else None
 ```
 
+With experiments in the project (`experiments/`, see [experiments.md](experiments.md)), the dashboard
+also has an **Experiments** page: the plan, Approve / Deny, the results and every sample, and a blind
+rating screen for human criteria (`--project PATH` when the project is not the current folder).
+
 Runs recorded before the dashboard existed have no configuration or task on their run span; the page says
 "not recorded" and shows everything else.
