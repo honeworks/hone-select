@@ -7,7 +7,6 @@ point, design change 0010 §6) and ``guides = "hone_models:guides"`` in ``[gener
 
 from __future__ import annotations
 
-import dataclasses
 import importlib
 from collections.abc import Mapping
 from typing import Any, cast
@@ -49,39 +48,42 @@ def guides() -> ModelGuides:
             'guides "hone_models:guides" needs hone-models; install hone-select[models], or remove `guides` '
             "from [generate] (then every need of a case is need_unknown)"
         ) from e
-    if not hasattr(hone_models, "guide"):
+    try:
+        unknown = importlib.import_module("hone_models.errors").ConfigError
+    except (ModuleNotFoundError, AttributeError):
+        unknown = None
+    if not hasattr(hone_models, "guide") or unknown is None:
         raise ConfigError(
             'guides "hone_models:guides" needs a hone-models with model guides (its change 0015); update '
             "hone-models, or remove `guides` from [generate]"
         )
-    return _Guides(hone_models)
+    return _Guides(hone_models, unknown)
 
 
 class _Guides:
-    def __init__(self, hone_models: Any) -> None:
+    def __init__(self, hone_models: Any, unknown: type[Exception]) -> None:
         self.mk = hone_models
+        self.unknown = unknown  # hone-models' ConfigError: an id the registry does not know
 
     def guide(self, model_id: str) -> Mapping[str, Any] | None:
         try:
             found = self.mk.guide(model_id)
-        except getattr(self.mk, "ConfigError", LookupError):  # an id the registry does not know
+        except self.unknown:  # an id the registry does not know
             return None
         return None if found is None else _as_json(found, model_id)
 
 
-def _as_json(guide: object, model_id: str) -> dict[str, Any]:
-    """The guide's JSON form (a mapping, ``to_json()``, ``model_dump()`` or a dataclass), with its text."""
-    found: Any = guide
-    if isinstance(found, Mapping):
-        out: dict[str, Any] = dict(cast(Mapping[str, Any], found))
-    elif hasattr(found, "to_json"):
-        out = dict(found.to_json())
-    elif hasattr(found, "model_dump"):
-        out = dict(found.model_dump(mode="json"))
-    else:
-        out = dataclasses.asdict(found)
-    as_text = getattr(guide, "as_text", None)
+def _as_json(guide: Any, model_id: str) -> dict[str, Any]:
+    """hone-models' ``ModelGuide.as_dict()`` (or a plain mapping), with its text; ``install`` becomes the
+    one command a person runs (``hone-models models install <id>``) and the steps it prints are kept as
+    ``install_commands``."""
+    as_text: Any = getattr(guide, "as_text", None)
+    out = dict(cast(Mapping[str, Any], guide)) if isinstance(guide, Mapping) else dict(guide.as_dict())
     if callable(as_text):
         out.setdefault("text", str(as_text()))
-    out.setdefault("install", f"hone-models models install {model_id}")
+    steps = out.get("install")
+    if isinstance(steps, list):
+        out["install_commands"] = [str(s) for s in cast(list[Any], steps)]
+    if not isinstance(steps, str):
+        out["install"] = f"hone-models models install {model_id}"
     return out
