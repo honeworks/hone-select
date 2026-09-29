@@ -1,5 +1,5 @@
 # Experiments
-*Design: [change 0009](../design/changes/0009-experiments.md), run conditions [change 0010](../design/changes/0010-run-conditions.md). Example: [`experiments.py`](../examples/experiments.py).*
+*Design: [change 0009](../design/changes/0009-experiments.md), run conditions [change 0010](../design/changes/0010-run-conditions.md), model-aware experiments [change 0011](../design/changes/0011-model-aware-experiments.md). Examples: [`experiments.py`](../examples/experiments.py), [`generation_experiment.py`](../examples/generation_experiment.py).*
 
 An **experiment** compares setups over a fixed set of test cases and tells you which setup is best, and
 separately which model, which parameter value and which prompt. The subject can be a prompt to a model,
@@ -97,6 +97,7 @@ order = "model"                   # every sample of one model before the next (f
 | `prompt` | `client = "module:factory"`, `prompt`, `system`, `output`, `params` | the case fields and the setup, as template values | the model's text, or JSON (`output = "json"`) |
 | `python` | `function = "module:function"` | `(case, setup, ctx)`; `ctx.workdir` is its own folder, `ctx.seed`, `ctx.case_files` | data, or a `Candidate` with `meta["measurements"]` |
 | `command` | `command = [...]` with `{case.*}`, `{setup.*}`, `{setup_json}`, `{workdir}`, `{seed}`, `{experiment}`, `{root}` | the arguments, and the same as JSON on stdin | files written to `{workdir}`; optionally a last stdout line `{"data": ..., "measurements": {...}}` |
+| `generate` | `client = "hone_models:image"` (`:music`, `:video`, or any `module:factory`), `prompt`, `inputs`, `output` | `generate(prompt, out=<workdir>/<output>, seed=, timeout_s=, trace=, **inputs)` | the result's files, `elapsed_s`, `cost_usd`, `error` and `error_kind` (see [Generation experiments](#generation-experiments-per-model-asks-and-needs)) |
 
 Every sample records its time, peak memory, exit code (commands), the files it produced and its log. A
 failure (an exception, a non-zero exit, a timeout, output that is not JSON) is a result: the sample is
@@ -261,6 +262,165 @@ assert environment["status"] == "ok"
 assert environment["before"]["gpu_lock"] == "held by this run"
 ```
 
+## Generation experiments, per-model asks and needs
+
+Image, music and video models are compared with the same plan, approval, run and results as text models,
+and each model is asked in the form it is best asked and only for what it can do.
+
+```toml
+[generate]
+kind = "generate"
+client = "hone_models:music"          # hone_models:image | :music | :video (extra `models`), or "module:factory"
+prompt = "{prompt}"                   # the factor `prompt` picks a file from prompts/, as for prompt subjects
+inputs = { lyrics = "{case.lyrics}", duration_s = "{setup.duration_s}", references = ["{case.files[front.png]}"] }
+output = "take.flac"                  # the file name inside the sample's folder
+timeout = 1800
+# guides = "hone_models:guides"       # where the model guides come from (the default for hone_models clients)
+
+[generate.per_model."ace-step-1.5-xl-turbo"]   # this model, in every case
+prompt = "{tags}"                              # its own prompt (a case field `tags`)
+inputs = { key = "{case.key}" }                # merged over [generate] inputs
+
+[factors]
+model = ["ace-step-1.5-xl-turbo", "songgeneration-v2-medium", "heartmula-3b"]
+prompt = ["short.md", "detailed.md"]
+duration_s = [60, 150]
+```
+
+- **The call.** Each sample calls `client(model).generate(prompt, out=..., seed=<the sample's seed>,
+  timeout_s=<timeout>, trace=..., **inputs)`. Placeholders are filled as in `command`; an input that is one
+  placeholder keeps its type (`duration_s` stays a number), and a value that names a case file becomes a
+  `Path`, so hone-models sends it as a file. The result's files are the output (with hashes, sizes,
+  dimensions, durations); `elapsed_s` and `cost_usd` are its measurements (`cost_estimated` says the cost is
+  hone-models' flat-price estimate); `license` and `commercial_use` go into the candidate's meta.
+- **Failures.** A `result.error` is a failed sample with its `error_kind` (`out_of_memory`, `refused`,
+  `invalid_input`, `no_output`, `failed`). With `[conditions]` declared, `out_of_memory` means the machine
+  was short: the sample is `outside` and runs once more, as any sample outside the conditions.
+- **Sessions.** A client with `session()` keeps its model loaded while samples of the same model follow each
+  other (`run.order = "model"`, the default) and frees it when the model changes and at the end.
+- **How each model is asked.** A case can ask one model differently: a `[case.per_model."<model>"]` table
+  replaces fields of that case for that model. A prompt file in `prompts/<model>/<file>` is used for that
+  model instead of `prompts/<file>`. The plan's `asked` shows, per setup, the resolved prompt and inputs, the
+  overrides and the cases asked differently; such setups are marked **asked differently** in the plan, the
+  results and the dashboard, so nobody reads them as "same prompt, different model". An override that
+  names no factor or case field, or a model the experiment does not run, is refused by `plan`. Per-model
+  overrides work for `prompt` subjects too.
+- **Judges stay blind.** Judges and scorers see the output and the case's shared fields, never an
+  override, a setup or a guide; `judge_view = ["scene"]` in a case limits them to those fields. A generation
+  output's data is `{"case": <what judges see>, "files": [...]}`.
+
+**Needs.** A case may say what it needs: `needs = ["camera angle"]` (a feature of a model's guide),
+`["references"]` (an input), `["duration_s >= 60"]` or `["references >= 3"]` (limits). The factors
+`duration_s` and `size` add a need per value (`duration_s = 150`). `plan` checks every cell against the
+model's guide:
+
+- a model whose guide does not list the feature or input, or whose limits exclude the value, cannot do the
+  cell: it is **not applicable**, not run, listed in the plan with the unmet need (`heartmula-3b: no feature
+  'camera angle'`), and neither a failure nor a zero in the results;
+- a limit the guide does not declare is `need_unknown`: the cell runs and its samples say so; without any
+  guide source every need is `need_unknown` and nothing is skipped;
+- each setup's numbers are over its applicable cases, with the count (`2 of 3; 1 not applicable`); the
+  ranking uses each setup's own mean; baseline differences, wins and losses, and factor levels use only the
+  cases both sides (every level) can do, and say how many; `summary.md` lists what each model could not
+  do.
+
+**Model guides.** With `client = "hone_models:*"` (or `guides = "<name>"`: a `hone.model_guides` entry
+point or a `module:factory`), `plan` reads each model's guide once and stores it in `plan.json` `models`: its
+summary, prompt advice, inputs, features with examples and source, limits, license, `commercial_use`,
+whether it is installed and the install command. The run uses the stored guides. A model reported not
+installed is listed in the plan with `hone-models models install <id>`, and `start` refuses until it is
+installed (or removed from the factors). A prompt subject can use `{model_guide}` (the guide as text) and a
+python subject `ctx.model_guide` (a dict, or `None`): the guide of the setup's `target_model`, else of its
+`model`, so an experiment can test which chat model writes the best prompt for an image model. The results
+carry each model's `license` and `commercial_use`; `summary.md` marks non-commercial models and never
+removes them. Without hone-select[models], `guides = "hone_models:guides"` is a `ConfigError` naming the
+extra.
+
+```python
+Path("studio.py").write_text("""
+from dataclasses import dataclass, field
+
+from hone_select import scorer
+from hone_select.testing import FakeModelGuides
+
+
+@dataclass
+class Result:  # what hone-select reads of hone-models' MediaResult
+    files: list = field(default_factory=list)
+    error: str | None = None
+    error_kind: str | None = None
+    elapsed_s: float = 1.0
+    cost_usd: float | None = None
+    license: str = "Apache-2.0"
+    commercial_use: bool = True
+
+
+class Painter:  # stands in for mk.image(model)
+    def __init__(self, model):
+        self.model = model
+
+    def generate(self, prompt, *, out, seed=None, timeout_s=None, trace=None, **inputs):
+        out.write_text(f"{self.model}: {prompt} {inputs}")
+        return Result(files=[out])
+
+
+def image(model):
+    return Painter(model)
+
+
+def guides():  # stands in for hone_models:guides
+    return FakeModelGuides({
+        "angles-model": {"features": [{"name": "camera angle", "how": "the camera_angle input"}]},
+        "plain-model": {"features": []},
+    })
+
+
+@scorer("follows")
+def follows(c):
+    return 0.9 if "camera_angle" in open(c.files["shot.txt"]).read() else 0.6
+""")
+
+angles = project.new("Camera angles")
+(angles / "experiment.toml").write_text("""
+title = "Camera angles"
+question = "Which image model follows a camera angle?"
+registry = ["studio"]
+[generate]
+kind = "generate"
+client = "studio:image"
+guides = "studio:guides"
+prompt = "{scene}"
+output = "shot.txt"
+[generate.per_model."angles-model"]
+inputs = { camera_angle = "{case.angle}" }
+[factors]
+model = ["angles-model", "plain-model"]
+[criteria]
+scorers = ["follows"]
+""")
+(angles / "cases" / "cases.toml").write_text("""
+[[case]]
+id = "rooftop"
+scene = "a girl on a rooftop at night"
+angle = "low_angle"
+needs = ["camera angle"]
+[[case]]
+id = "harbour"
+scene = "a harbour"
+angle = "top_down"
+[case.per_model."plain-model"]
+scene = "a harbour, seen from above"
+""")
+plan = project.plan("E0003")
+print(plan["applicability"]["not_applicable"][0]["unmet"])  # ["plain-model: no feature 'camera angle'"]
+project.review("E0003", "approved", note="go")
+start(project, "E0003")
+res = json.loads((angles / "results" / "results.json").read_text())
+plain = next(s for s in res["setups"].values() if s["params"]["model"] == "plain-model")
+assert plain["applicable"]["cases"] == 1 and plain["asked_differently"]
+assert "`plain-model` could not do: camera angle (1 of 2 cases)" in res["could_not"]
+```
+
 ## Approving, rating and reading in the dashboard
 
 `hone-select dashboard` (from the project folder, or `--project PATH`) adds an **Experiments** page:
@@ -268,7 +428,8 @@ the list with status and progress; one experiment with its plan (setups, outputs
 commands), **Approve / Deny** with a note while it is proposed, its reviews, results tables per setup,
 factor and baseline, and every sample with its output, files (images, audio and video play inline),
 log and run conditions; a **Run conditions** card with the declared conditions, the plan's reading, the
-last reading and the waits; a `waiting` badge with its reason; and **Rate** for each human criterion, one output at a time, blind to the setup. After rating, run
+last reading and the waits; a **Models** card (in Plan and Definition) with each model's guide, whether
+it is installed, how each setup's model is asked and the cells not run; a `waiting` badge with its reason; and **Rate** for each human criterion, one output at a time, blind to the setup. After rating, run
 `hone-select experiments report E0001` to include the ratings in the results.
 
 One run at a time: `start` refuses an experiment that is running or waiting (stop it first) or completed (run

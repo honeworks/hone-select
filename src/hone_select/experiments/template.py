@@ -14,15 +14,18 @@ samples = 1               # outputs per setup and case (different seeds)
 seed = 0
 registry = []             # modules with your @scorer / @gate functions, e.g. ["myproject.criteria"]
 
-# What is tested (one of three kinds) ---------------------------------------------------------------
+# What is tested (one of four kinds) ----------------------------------------------------------------
 [generate]
-kind = "prompt"                       # prompt | python | command
+kind = "prompt"                       # prompt | python | command | generate
 client = "hone_models:text"           # prompt: "module:factory" returning a TextClient; called with the model
 prompt = "{{prompt}}"                 # a template; "{{prompt}}" uses the file in prompts/ named by the factor
 output = "text"                       # text | json
 # kind = "python"   ->  function = "myproject.module:function"      (called with case, setup, ctx)
 # kind = "command"  ->  command = ["python", "{{experiment}}/scripts/run.py", "{{setup_json}}", "{{workdir}}"]
 #   (runs from the project root; {{experiment}} is this folder, {{workdir}} the sample's own folder)
+# kind = "generate" ->  client = "hone_models:image" (or :music, :video), output = "shot.png",
+#                       inputs = {{ size = "1024x1024", references = ["{{case.files[front.png]}}"] }}
+# [generate.per_model."<model>"]      # ask one model its own way: prompt = "...", inputs = {{ ... }}
 # timeout = 1800
 # wrap = ["scripts/gpu-lock.sh"]      # run the command inside a wrapper
 # keep_files = "all"                  # all | small | none

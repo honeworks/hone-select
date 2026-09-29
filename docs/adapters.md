@@ -80,6 +80,15 @@ experiment does not need. Without hone-models installed, planning such an experi
 if_busy=...)` fits (`hone_select.ports.MachineProbe`); check yours with
 `hone_select.testing.check_machine_probe`, and use `FakeMachineProbe` in tests.
 
+It also provides what experiments need for image, music and video models
+([experiments](experiments.md#generation-experiments-per-model-asks-and-needs)): `client =
+"hone_models:image"` (`:music`, `:video`) in a `kind = "generate"` subject resolves through the
+`hone.image_clients` / `hone.music_clients` / `hone.video_clients` entry points, and `guides =
+"hone_models:guides"` (the `hone.model_guides` entry point, the default with those clients) reads each
+model's guide: what it can take, its limits and license, and whether it is installed. Any object with
+`guide(model_id)` returning the guide as a mapping (or `None`) fits (`hone_select.ports.ModelGuides`);
+check yours with `hone_select.testing.check_model_guides`, and use `FakeModelGuides` in tests.
+
 ## Your own client and the contract checkers
 *Example: [`bring_your_own_client.py`](../examples/bring_your_own_client.py).*
 

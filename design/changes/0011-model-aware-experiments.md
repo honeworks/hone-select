@@ -2,7 +2,7 @@
 
 ## Status
 
-`accepted` (2026-09-29, owner: "start implementing"; open questions take the proposed answers). Builds on [0009](0009-experiments.md) (experiments) and uses hone-models change
+`implemented in 0.1.0` (accepted 2026-09-29, owner: "start implementing"; open questions take the proposed answers; implementation choices in design/decisions.md D-020 to D-026). Builds on [0009](0009-experiments.md) (experiments) and uses hone-models change
 [0015 generation models](https://github.com/honeworks/hone-models/blob/main/design/changes/0015-generation-models.md):
 its image, music and video clients, and its model guides. Written next to [0010](0010-run-conditions.md),
 which takes AC-30 to AC-35; this record takes AC-36 to AC-39.

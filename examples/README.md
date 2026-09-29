@@ -55,6 +55,7 @@ order.
 | File | Concept | What you learn | Design |
 |---|---|---|---|
 | [`experiments.py`](experiments.py) | `hone_select.experiments`: new, plan, approve, start, results | Compare setups (factors, a baseline) over test cases with a plan a person approves; read which setup and which factor level win. | §12 |
+| [`generation_experiment.py`](generation_experiment.py) | `kind = "generate"`, `per_model`, `needs`, guides | Compare generation models, each asked its own way, only on the cases they can do; the plan lists the cells not run. | §12 |
 
 ## With the rest of honeworks
 | File | Concept | What you learn | Design |

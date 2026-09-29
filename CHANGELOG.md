@@ -13,9 +13,22 @@ changes found in the demo apps: [0003](design/changes/0003-name-a-position-biase
 [0004](design/changes/0004-gate-details.md), [0005](design/changes/0005-prompt-scorer-with-several-images.md),
 [0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md),
 [0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md),
-[0010](design/changes/0010-run-conditions.md).
+[0010](design/changes/0010-run-conditions.md), [0011](design/changes/0011-model-aware-experiments.md).
 
 ### Added (from the demo apps)
+- Model-aware experiments: a `kind = "generate"` subject calls an image, music or video client per sample
+  (`client = "hone_models:music"`, or any `module:factory`) with the sample's seed, an output file in its
+  folder, case files as paths, and keeps the files, `elapsed_s`, cost, `error_kind`, license and
+  `commercial_use`; `out_of_memory` with run conditions is run again; one client session per model group.
+  Each model can be asked its own way (`[generate.per_model."<model>"]`, a case's `per_model`,
+  `prompts/<model>/<file>`), shown as "asked differently" in the plan, the results and the dashboard;
+  judges see only a case's shared fields (`judge_view`). Cases declare `needs`; cells a model cannot do
+  are not run, listed in the plan and left out of the failures; results count applicable cases and
+  compare on shared ones, list what each model could not do and mark non-commercial models. The plan
+  stores each model's guide (`plan.json` `models`) and `start` refuses while a model is not installed;
+  `{model_guide}` and `ctx.model_guide` give subjects the guide. New port `hone_select.ports.ModelGuides`,
+  `FakeModelGuides`, `check_model_guides`, and the `hone_models:guides` source in the `hone.model_guides`
+  entry-point group ([design change 0011](design/changes/0011-model-aware-experiments.md)).
 - Run conditions for experiments: `[conditions]` in `experiment.toml` declares the machine state a run
   needs (CPU load, free RAM and VRAM, GPU utilization, only the needed models loaded and fully on the GPU,
   the machine-wide GPU lock for the whole run); the run checks it between samples and waits, stops or
