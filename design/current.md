@@ -695,6 +695,9 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 | AC-38 | Needs | cells whose model lacks a needed feature or limit (a case's need or a factor value) are not applicable: listed with the unmet need in the plan and the CLI, not run, not failures, not in `outputs`; an undeclared limit runs and is marked `need_unknown`; per-setup numbers are over applicable cases with the count; baseline differences, wins and losses and factor levels use only shared cases and say how many; the summary lists what each model could not do; without a guide source every need is `need_unknown` |
 | AC-39 | Model guides | `plan.json` `models` stores each model's guide, installed state, install command and license, and the dashboard shows them; `{model_guide}` (of `target_model`, else `model`) and `ctx.model_guide` get the stored guide; results carry license and `commercial_use` and the summary marks a non-commercial model without removing it; a model reported not installed makes `start` refuse, naming the install command, until the source reports it installed; without hone-select[models] a declared `hone_models:guides` is a `ConfigError` naming the extra; `FakeModelGuides` passes `check_model_guides` |
 | AC-29 | Ratings and the Experiments page | human criteria are rated blind in a fixed random order and join the results; the dashboard lists and shows experiments, approves or denies them, takes ratings and serves their files; writes without the page's header or from another origin, and paths outside `cases/` and `outputs/`, are refused |
+| AC-40 | A/B pairs (design change 0012): `between = "top"`, `top = 2`, `pairs = 6` over 3 cases, after a run | `ab_plan.json` holds 6 pairs, each the same case from the two best setups, 2 per case, left and right seeded; failed and outside samples never appear; the API serves the next pair without setup names; before the run the pairs wait; unknown names in `between` fail at plan time |
+| AC-41 | A/B picks through the dashboard API | left, right and tie are stored in `ab.jsonl` as specified; undo removes the last pick; a write without the page's header stores nothing; a bad choice, a tie with `allow_tie = false` or a second pick of a pair is refused |
+| AC-42 | A/B results after 20 picks (14-5-1) | wins, losses and ties of each side, win rate 73.7 % with its Wilson interval, `clear`, `complete`, the summary line and the winner per case; an unfinished A/B shows `complete: false`; `experiments report` recomputes |
 
 ## 11. Not in v0.1
 
@@ -713,7 +716,8 @@ Design change [0009](changes/0009-experiments.md); user guide [docs/experiments.
 An experiment is a folder `experiments/E000N-<slug>/` in a project: `experiment.toml` (title, question,
 cases, samples, seed, registry, `[generate]` subject, `[factors]`, `[design]`, `[[baseline]]`, `[criteria]`,
 `[judges.*]`, `[scorers.*]`, `[budget]`, `[run]`, `[conditions]`), `cases/`, `prompts/`, `scripts/`, and what hone-select
-writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `results/`.
+writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `ab_plan.json`, `ab.jsonl`,
+`results/`.
 
 - **Status** comes from the files: draft (no plan, or the definition changed since), proposed, approved /
   denied (the last decision on the current plan's definition hash), running / waiting / stopped / completed.
@@ -726,7 +730,7 @@ writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `re
 - **Running:** one run at a time (a live run or a completed experiment refuses `start`); samples in
   `run.order`, skipping done ones (resume), stopping at `STOP` or the budget; then one
   selection per case (`Engine.select`) with the criteria (`measure` normalized over the experiment, human
-  criteria excluded), recorded in `.hone/select/spans.db` of the project.
+  and A/B criteria excluded), recorded in `.hone/select/spans.db` of the project.
 - **Results:** per setup, per factor level and against each baseline: mean total with a 95 % bootstrap
   interval over cases, pass rate, errors, wins, criteria, measurements, money, human ratings; scorer
   agreement for `compare` pairs. `hone_select.experiments` is the Python API (`Project`, `start`, `stop`,
@@ -760,3 +764,19 @@ writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `re
   installed (D-024); `{model_guide}` and `ctx.model_guide` give subjects the guide (D-022). Results carry
   `applicable` counts per setup, baseline and factor comparisons on shared cases (D-026), `models` (license,
   `commercial_use`, non-commercial marked, never removed) and `could_not`.
+- **A/B** (design change [0012](changes/0012-ab-judgement.md)): a `kind = "ab"` criterion (`question`,
+  `between` = `"top"` | `"baseline"` | a list of setup ids, baseline or `[[setup]]` names, `top` = 2,
+  `pairs` = 20, `allow_tie` = true; names checked at plan time, D-029) is judged by a person and is not part
+  of the automatic total. Its pairs are the same case from two setups (the same sample index when both
+  have it, never a failed or outside / unknown sample), spread evenly over the cases, left and right seeded
+  by the experiment's seed (D-028); they are drawn when every case is scored, by the run's report or the
+  first request, and fixed in `ab_plan.json` for the plan's definition hash (D-027). Picks are appended to
+  `ab.jsonl` (`criterion`, `pair`, `case`, `left`, `right`, `choice`, `at`; an undo is `{"undo": <line>}`).
+  The dashboard's A/B screen shows two outputs side by side with Left / Tie / Right (keys ←, T, →), the
+  progress and undo; its API names a pair by its index and serves its files by index and side, never a
+  setup (`GET /api/experiments/<eid>/ab/<criterion>[/<index>/<side>/<path>]`, `POST .../ab`,
+  `POST .../ab/undo`, with the dashboard's write protections: its header, same origin, a loopback Host).
+  `results.json` `ab` has, per criterion and pair of setups (more wins first), each side's wins, losses and
+  ties, the win rate without ties with a 95 % Wilson interval, `clear` (the interval excludes 50 %),
+  `judged` / `planned` / `requested`, `complete` and the winner per case; `summary.md` has one line per
+  pair (D-030).

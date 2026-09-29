@@ -103,6 +103,8 @@ that raises gives `Score(None, error=...)` and the run goes on: a failure is nev
   for free CPU, RAM and VRAM, unloads models it does not need, holds the GPU lock and marks every sample.
   Image, music and video models are a `generate` subject: each model can be asked its own way, and cases a
   model cannot do (by its hone-models guide) are listed in the plan and not run, not counted as failures.
+  A person can rate outputs or pick the better of two (A/B), blind to the setup, in the dashboard; A/B
+  results give a win rate with its interval per pair of setups.
 - **Dashboard:** `hone-select dashboard` serves a local web page over the store and the experiments: filterable runs, each
   run's configuration, task and candidate table (variation params, gates, scores, winner, reasons), and
   candidates across runs compared by any variation param.

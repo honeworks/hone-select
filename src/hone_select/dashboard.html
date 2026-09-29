@@ -141,6 +141,11 @@
   .rate { max-width: 760px; margin: 0 auto; }
   .scale { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 18px 0 6px; }
   .scale .btn { min-width: 56px; padding: 12px 0; font-size: 16px; }
+  .ab { max-width: 1200px; margin: 0 auto; }
+  .ab-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+  .ab-sides .card > .muted:first-child { font-weight: 600; margin-bottom: 4px; }
+  .ab-sides pre { max-height: 60vh; }
+  .ab .scale .btn { min-width: 120px; padding: 12px 18px; }
   .kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   ol.steps { margin: 8px 0 0 18px; padding: 0; line-height: 2.1; }
   @media (max-width: 900px) {
@@ -151,6 +156,7 @@
     .toolbar input[type=search] { width: 100%; }
     .chart .lvl { grid-template-columns: 100px 1fr 50px; }
     .cards { grid-template-columns: minmax(0, 1fr); }
+    .ab-sides { grid-template-columns: minmax(0, 1fr); }
   }
 </style>
 </head>
@@ -278,8 +284,9 @@ function table(el, columns, rows, opts = {}) {
   drawHead(); drawBody();
 }
 
-const fileView = (eid, base, name) => {
-  const url = `/files/${encodeURIComponent(eid)}/${base}/${name.split("/").map(encodeURIComponent).join("/")}`;
+const filePath = name => name.split("/").map(encodeURIComponent).join("/");
+const fileView = (eid, base, name) => mediaView(`/files/${encodeURIComponent(eid)}/${base}/${filePath(name)}`, name);
+const mediaView = (url, name) => {
   if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><img src="${url}" alt="${esc(name)}"></div>`;
   if (/\.(wav|mp3|ogg|flac|m4a)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><audio controls src="${url}"></audio></div>`;
   if (/\.(mp4|webm|mov)$/i.test(name)) return `<div class="media"><div class="muted">${esc(name)}</div><video controls src="${url}"></video></div>`;
@@ -504,16 +511,16 @@ function overview(x) {
     <div class="muted">Mean total <b style="color:var(--text)">${fmt(best.total.mean)}</b> (95% interval ${fmt(best.total.low)} to ${fmt(best.total.high)}) · wins ${best.wins} of ${x.plan.cases.length} cases · pass rate ${pct(best.pass_rate)}</div>
     ${Object.entries(r.baselines).map(([b, diffs]) => diffs[r.best] ? `<div class="muted" style="margin-top:4px">Against baseline <b>${esc(b)}</b>: ${signed(diffs[r.best].diff)} ${diffs[r.best].clear ? `<span class="pill ok">clearly better</span>` : `<span class="pill">not a clear difference</span>`}</div>` : `<div class="muted" style="margin-top:4px">The baseline <b>${esc(b)}</b> is the best setup.</div>`).join("")}</div>` : "";
   const charts = Object.entries(r.factors).map(([f, levels]) => factorChart(f, levels)).join("");
-  const humans = Object.keys(x.human || {});
+  const humans = Object.keys(x.human || {}), abs = Object.keys(x.ab || {});
   return tiles + notCounted(r) + answer + conditionsCard(x) + (charts ? `<h2>Which value of each setting wins</h2><div class="cards">${charts}</div>` : "") +
-    (humans.length ? `<h2>Your ratings</h2><div class="cards">${humans.map(h => `<div class="card row"><div><b>${esc(x.human[h].question)}</b><div class="muted">${esc(h)} · scale ${x.human[h].scale.join("–")}</div></div><a class="btn primary" href="#/rate/${esc(x.eid)}/${esc(h)}">Rate</a></div>`).join("")}</div>` : "");
+    (humans.length || abs.length ? `<h2>Your judgement</h2><div class="cards">${humans.map(h => `<div class="card row"><div><b>${esc(x.human[h].question)}</b><div class="muted">${esc(h)} · scale ${x.human[h].scale.join("–")}</div></div><a class="btn primary" href="#/rate/${esc(x.eid)}/${esc(h)}">Rate</a></div>`).join("")}${abs.map(a => `<div class="card row"><div><b>${esc(x.ab[a].question)}</b><div class="muted">${esc(a)} · two outputs side by side, blind · ${x.ab[a].pairs} pairs</div></div><a class="btn primary" href="#/ab/${esc(x.eid)}/${esc(a)}">A/B</a></div>`).join("")}</div>` : "");
 }
 function resultsTab(x, el) {
   const r = x.results;
   if (!r) { el.innerHTML = `<div class="card empty">No results yet.</div>`; return; }
   const factors = Object.keys(x.factors), crit = [...new Set(Object.values(r.setups).flatMap(s => Object.keys(s.criteria)))];
   const max = Math.max(...Object.values(r.setups).map(s => s.total.high ?? s.total.mean ?? 0), 0.0001);
-  el.innerHTML = `${notCounted(r)}<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
+  el.innerHTML = `${notCounted(r)}<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${abResults(r)}${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
     ${Object.keys(r.agreement || {}).length ? `<h2>Judge agreement</h2><div class="card kv">${Object.entries(r.agreement).map(([k, v]) => `<span>${esc(k)}</span><span>mean difference ${fmt(v)}</span>`).join("")}</div>` : ""}`;
   table($("rs"), [
     ...factors.map(f => ({label: f, get: s => s.params[f], ...(f === "model" ? {html: s => esc(s.params[f]) + (s.asked_differently ? ` <span class="pill info" title="its model gets its own prompt or inputs">asked differently</span>` : "")} : {})})),
@@ -530,6 +537,19 @@ function resultsTab(x, el) {
       {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`},
       {key: "shared_cases", label: "Shared cases", title: "the cases both setups can do", num: true}],
       Object.entries(diffs).map(([id, v]) => ({id, ...v})));
+}
+function abResults(r) {
+  const rows = Object.entries(r.ab || {}).flatMap(([name, a]) => a.ready ? a.pairs.map(p => ({name, ...p})) : [{name, waiting: true}]);
+  if (!rows.length) return "";
+  const cell = p => {
+    if (p.waiting) return `<td>${esc(p.name)}</td><td colspan="5" class="muted">waiting for the run</td>`;
+    const [a, b] = p.setups, s = p.sides[a];
+    return `<td>${esc(p.name)}</td><td><span class="mono">${esc(a)}</span> vs <span class="mono">${esc(b)}</span></td><td class="num">${s.wins}-${s.losses}-${s.ties}</td>
+      <td class="num">${p.win_rate === null ? "—" : `${pct(p.win_rate)} (${pct(p.low)} to ${pct(p.high)})`}</td>
+      <td>${p.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`}</td><td class="num">${p.judged} of ${p.planned}${p.complete ? "" : ` <span class="pill warn">unfinished</span>`}</td>`;
+  };
+  return `<h2>A/B picks</h2><div class="tablewrap"><table><thead><tr><th>Criterion</th><th>Setups (more wins first)</th><th class="num">Wins-losses-ties</th><th class="num">Win rate (95% interval)</th><th>Clear</th><th class="num">Picks</th></tr></thead>
+    <tbody>${rows.map(p => `<tr>${cell(p)}</tr>`).join("")}</tbody></table></div>`;
 }
 async function sampleDrawer(x, s) {
   const [c, setup, k] = s.sample_id.split("__");
@@ -632,6 +652,47 @@ async function showRate(eid, criterion) {
   document.onkeydown = e => { const v = Number(e.key); if (e.key.length === 1 && v >= low && v <= high) rate(v); };
 }
 
+async function showAB(eid, ab) {
+  const o = await get(`/api/experiments/${eid}/ab/${ab}`);
+  const crumbs = `<a href="#/experiments">Experiments</a> / <a href="#/experiment/${esc(eid)}">${esc(eid)}</a> / A/B`;
+  const undo = async () => {
+    try { await send(`/api/experiments/${eid}/ab/undo`, {criterion: ab}); toast("Undone"); route(); }
+    catch (e) { toast(e.message); }
+  };
+  if (o.state === "waiting") {
+    main.innerHTML = head("A/B: waiting for the run", `The pairs for ${esc(ab)} are drawn when generation and automatic scoring are done.`, crumbs);
+    return;
+  }
+  if (o.state === "done") {
+    main.innerHTML = head("Every pair is judged", `${o.judged} of ${o.total} pairs have a pick for ${esc(ab)}. Recompute the results to include them.`, crumbs,
+      o.judged ? `<button class="btn" id="undo">Undo the last pick</button>` : "") +
+      `<div class="card callout ok"><div class="muted">Include the picks in the results:</div>${cmd(`hone-select experiments report ${eid}`)}</div>`;
+    if (o.judged) $("undo").onclick = undo;
+    return;
+  }
+  const side = (label, key) => {
+    const files = o[key].files.map(n => mediaView(`/api/experiments/${encodeURIComponent(eid)}/ab/${encodeURIComponent(ab)}/${o.index}/${key}/${filePath(n)}`, n)).join("");
+    return `<div class="card"><div class="muted">${label}</div>${outputView(o[key].data)}${files}</div>`;
+  };
+  main.innerHTML = `<div class="ab">${head(esc(o.question), "Two outputs for the same input; which setup made each is hidden.", crumbs, o.can_undo ? `<button class="btn" id="undo">Undo the last pick</button>` : "")}
+    <div class="row muted" style="margin-bottom:6px"><span>${o.judged + 1} of ${o.total}</span><span>case <b>${esc(o.case)}</b></span></div>${progress(o.judged, o.total)}
+    <div class="ab-sides">${side("Left", "left")}${side("Right", "right")}</div>
+    <div class="scale"><button class="btn" data-c="left">← Left</button>${o.allow_tie ? `<button class="btn" data-c="tie">Tie</button>` : ""}<button class="btn" data-c="right">Right →</button></div>
+    <div class="muted" style="text-align:center;font-size:12.5px">or press <span class="kbd">←</span>${o.allow_tie ? ` <span class="kbd">T</span>` : ""} <span class="kbd">→</span></div></div>`;
+  const pick = async choice => {
+    document.onkeydown = null;
+    try { await send(`/api/experiments/${eid}/ab`, {criterion: ab, index: o.index, choice}); route(); }
+    catch (e) { toast(e.message); route(); }
+  };
+  main.querySelectorAll("button[data-c]").forEach(b => b.onclick = () => pick(b.dataset.c));
+  if (o.can_undo) $("undo").onclick = undo;
+  document.onkeydown = e => {
+    if (e.key === "ArrowLeft") pick("left");
+    else if (e.key === "ArrowRight") pick("right");
+    else if ((e.key === "t" || e.key === "T") && o.allow_tie) pick("tie");
+  };
+}
+
 // ---- routing ---------------------------------------------------------------------------------------
 async function route() {
   clearTimeout(refresh); closeDrawer(); document.onkeydown = null;
@@ -644,6 +705,7 @@ async function route() {
     else if (hash.startsWith("#/candidates")) await showCandidates();
     else if (hash.startsWith("#/experiment/")) { const [eid, tab] = hash.slice(13).split("/").map(decodeURIComponent); await showExperiment(eid, tab); }
     else if (hash.startsWith("#/rate/")) await showRate(...hash.slice(7).split("/").map(decodeURIComponent));
+    else if (hash.startsWith("#/ab/")) await showAB(...hash.slice(5).split("/").map(decodeURIComponent));
     else await showExperiments();
   } catch (e) {
     main.innerHTML = head("Something went wrong") + `<div class="card callout bad"><div>${esc(e.message)}</div><a class="btn" href="#/experiments">Back to experiments</a></div>`;

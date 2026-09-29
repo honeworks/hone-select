@@ -229,7 +229,9 @@ PLACEHOLDER = re.compile(r"\$\{[^}]*\}")
 
 def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
     """No DOM tooling here: fetch every API path the page's code calls, with real ids filled in."""
-    p, _ = approved(tmp_path, HUMAN)
+    p, _ = approved(
+        tmp_path, HUMAN + '[scorers.owner_pick]\nkind = "ab"\nquestion = "Which one?"\npairs = 2\n'
+    )
     start(p, "E0001")
     srv = make_server(tmp_path / ".hone" / "select" / "spans.db", port=0, project=tmp_path)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -245,6 +247,7 @@ def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
             "/api/experiments",
             "/api/experiments/${eid}",
             "/api/experiments/${eid}/rate/${criterion}",
+            "/api/experiments/${eid}/ab/${ab}",
         }
         assert expected <= set(called)  # every section of the page still calls its endpoint
         assert any(c.startswith("/files/") for c in called)  # the samples panel reads result.json
@@ -255,12 +258,13 @@ def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
             "showRun",
             "showCandidates",
             "showRate",
+            "showAB",
         ):
             assert f"function {view}(" in page  # every view the router names is defined
         run_id = call(base + "/api/runs")[1][0]["run_id"]
         sample = call(base + "/api/experiments/E0001")[1]["samples"][0]["sample_id"]
         case, setup, k = sample.split("__")
-        values = {"eid": "E0001", "criterion": "keep_reading", "id": run_id}
+        values = {"eid": "E0001", "criterion": "keep_reading", "ab": "owner_pick", "id": run_id}
         for template in called:
             if template.startswith("/files/"):
                 url = f"/files/E0001/outputs/{case}/{setup}/{k}/result.json"  # what the samples panel fetches

@@ -121,6 +121,20 @@ class HumanScorer(_Model):
     min_ratings: int = Field(default=1, ge=1)  # per setup, before the criterion counts as complete
 
 
+class ABScorer(_Model):
+    """`kind = "ab"`: a person picks the better of two outputs of one case, blind (design change 0012)."""
+
+    kind: Literal["ab"]
+    question: str
+    between: Literal["top", "baseline"] | list[str] = "top"  # or setup ids / baseline or setup names
+    top: int = Field(default=2, ge=2)  # with between = "top": how many of the best setups
+    pairs: int = Field(default=20, ge=1)  # pairs to judge per pair of setups
+    allow_tie: bool = True
+
+
+PERSON = {"human": HumanScorer, "ab": ABScorer}  # criteria a person judges: never in the automatic total
+
+
 class ExperimentSpec(_Model):
     title: str
     question: str = ""
@@ -143,6 +157,13 @@ class ExperimentSpec(_Model):
     def human_scorers(self) -> dict[str, HumanScorer]:
         return {n: HumanScorer.model_validate(s) for n, s in self.scorers.items() if s.get("kind") == "human"}
 
+    def ab_scorers(self) -> dict[str, ABScorer]:
+        return {n: ABScorer.model_validate(s) for n, s in self.scorers.items() if s.get("kind") == "ab"}
+
+    def person_scorers(self) -> set[str]:
+        """The names of the criteria a person judges (ratings and A/B)."""
+        return {n for n, s in self.scorers.items() if s.get("kind") in PERSON}
+
 
 def load(folder: Path) -> ExperimentSpec:
     """Read and validate `experiment.toml` in `folder`."""
@@ -154,10 +175,19 @@ def load(folder: Path) -> ExperimentSpec:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: not valid TOML: {e}") from e
     except ValidationError as e:
-        problems = "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors())
-        raise ConfigError(f"{path}: {problems}") from e
+        raise ConfigError(f"{path}: {_problems(e)}") from e
+    for name, s in spec.scorers.items():
+        model = PERSON.get(str(s.get("kind")))
+        try:
+            _ = model.model_validate(s) if model else None
+        except ValidationError as e:
+            raise ConfigError(f"{path}: [scorers.{name}] {_problems(e)}") from e
     _check(spec)
     return spec
+
+
+def _problems(e: ValidationError) -> str:
+    return "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors())
 
 
 def _check(spec: ExperimentSpec) -> None:
@@ -218,6 +248,13 @@ def baselines(spec: ExperimentSpec) -> dict[str, str]:
     return {
         str(b.get("name", f"baseline{i + 1}")): setup_id(_fill(b, spec)) for i, b in enumerate(spec.baseline)
     }
+
+
+def setup_names(spec: ExperimentSpec) -> dict[str, str]:
+    """Every name a setup can be called by -> its setup id: the ids, the baselines' names and the names of
+    `[[setup]]` entries (design change 0012 `between`)."""
+    named = {str(s["name"]): setup_id(_fill(s, spec)) for s in spec.setup if "name" in s}
+    return {sid: sid for sid in map(setup_id, setups(spec))} | named | baselines(spec)
 
 
 def definition_hash(folder: Path) -> str:

@@ -11,6 +11,7 @@ import threading
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
+from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Any
 
@@ -202,8 +203,13 @@ def test_ac39_without_the_extra_a_declared_guides_is_a_config_error(
         p.plan("E0001")
     (tmp_path / "bad").mkdir()
     p, _ = project(tmp_path / "bad", SONGS.replace("tests.e2e.fake_media:guides", "nope"), CASES)
+    installed = [EntryPoint(name="hone_models:guides", value="x:y", group="hone.model_guides")]
+    monkeypatch.setattr(
+        "hone_select.experiments.guides.entry_points",
+        lambda group, name=None: [e for e in installed if name in (None, e.name)],
+    )  # the installed sources, whatever hone-models version is present
     with pytest.raises(
-        ConfigError, match=r"guides 'nope' is neither an installed guide source \(\['hone_models:guides'"
+        ConfigError, match=r"guides 'nope' is neither an installed guide source \(\['hone_models:guides'\]\)"
     ):
         p.plan("E0001")
     (tmp_path / "none").mkdir()
