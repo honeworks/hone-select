@@ -561,7 +561,7 @@ Every span has `hone.schema_version = "1"` and copies from the trace context `ho
 
 | Span | Attributes |
 |---|---|
-| `hone.select.run` (root) | `hone.select.config_hash`, `hone.select.policy`, `hone.select.n`, `hone.select.budget.cost_used`, `hone.select.budget.seconds_used`, `hone.select.budget.money_used` |
+| `hone.select.run` (root) | `hone.select.config_hash`, `hone.select.config` (the validated configuration, JSON), `hone.select.task` (the task's first 2,000 characters; content), `hone.select.policy`, `hone.select.n`, `hone.select.budget.cost_used`, `hone.select.budget.seconds_used`, `hone.select.budget.money_used` |
 | `hone.select.generate` | `hone.select.candidate` (JSON `{id, meta, data_preview, data_sha256}`) |
 | `hone.select.gate` | `hone.select.gate`, `hone.select.gate.passed`, `hone.select.gate.probability`, `hone.select.gate.details` (only when the gate returned details; content, hashed when capture is off) |
 | `hone.select.score` | `hone.select.scorer`, `hone.select.scorer_version`, `hone.select.cache_hit`, `hone.select.score.value`, `hone.select.score.confidence`, `hone.select.score.reason`, `hone.select.score.error`, `hone.select.image_keys` (only for a judge with `images_from`) |
@@ -599,11 +599,20 @@ Adapters are imported lazily; the core never imports them.
 hone-select run CONFIG --task task.json --registry MODULE [--seed N] [--json]
 hone-select explain RUN_ID [--db PATH]
 hone-select show RUN_ID [--db PATH] [--json]
+hone-select dashboard [--db PATH] [--host 127.0.0.1] [--port 8788] [--open]
 ```
 
 `run` uses the top-level components of the registry module; `explain` rebuilds the decision from the
 store; `show` prints every span of the run's trace. Errors print one `error: ...` line and exit 1.
 `python -m hone_select.cli` is the same command.
+
+`dashboard` serves a read-only web page over the store (design change
+[0008](changes/0008-dashboard.md)): the runs (filterable, sortable, with their trace context), one run
+(configuration, task, budget, the candidate table with variation params, gates, one column per scorer,
+total, rank and winner, every reason on click, pairwise judgements, decision trace) and all candidates
+across runs with a group-by on any variation param (candidates, wins, win rate, mean total). The server is
+the standard library's `http.server` on localhost; `hone_select.dashboard.list_runs`, `run_detail` and
+`all_candidates` return the same data as JSON-ready values.
 
 ## 10. Acceptance cases
 
@@ -635,6 +644,7 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 | AC-21 | Examples | every `examples/*.py` runs offline, opens with a What / How / Why docstring and is listed in `examples/README.md` |
 | AC-22 | `Engine.select` on existing candidates | returns a `Result`: winner, ranking, the decision trace (dedup with `duplicate_of`, the embedder-failure warning), `run_id` that `explain_run` finds, budget; `score()` equals `select().ranked` |
 | AC-23 | A gate returns `details` (a `GateResult` or a GateLike mapping) | kept in `Scored.gates[name].details`, also for rejected candidates; recorded as `hone.select.gate.details` on the gate span, hashed when content capture is off |
+| AC-24 | The dashboard over a store with two runs in one trace | lists both runs newest first with policy, n, candidates, winner and trace context; a run shows its configuration, task and every candidate with variation params, gate results and scores; candidates across runs carry their params; the task is hashed when content capture is off; the server answers `/`, `/api/runs`, `/api/runs/<id>`, `/api/candidates` and 404s unknown paths |
 
 ## 11. Not in v0.1
 

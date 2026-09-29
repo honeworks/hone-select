@@ -26,6 +26,8 @@ from hone_select.selectors import reaches, select
 from hone_select.types import Candidate, Result, Scored, Variation, as_text, canonical_json
 from hone_select.variation import variations
 
+TASK_PREVIEW = 2000  # characters of the task kept on the run span (design change 0008)
+
 
 class Engine:
     """Generate N candidates, score them with your scorers, and select a winner by policy.
@@ -64,7 +66,7 @@ class Engine:
     def run(self, task: Any, *, trace: Mapping[str, str] | None = None, seed: int | None = None) -> Result:
         """Generate candidates for ``task``, score them and select the winner."""
         run = self._new_run()
-        with span(self.sink, "hone.select.run", self._run_attributes(), trace=trace) as root:
+        with span(self.sink, "hone.select.run", self._run_attributes(run, task), trace=trace) as root:
             self._warn_goodhart(run)
             stream = self._generate(run, task, seed or 0)
             if self.config.select.policy == "first_above":
@@ -77,7 +79,7 @@ class Engine:
         """Score and select among existing candidates (no generator): the ``run()`` twin, same ``Result``
         with the decision trace, ``run_id`` and budget (design change 0006)."""
         run = self._new_run()
-        with span(self.sink, "hone.select.run", self._run_attributes(), trace=trace) as root:
+        with span(self.sink, "hone.select.run", self._run_attributes(run), trace=trace) as root:
             return self._decide(run, self._pipeline(run, list(candidates)), root)
 
     def score(self, candidates: list[Candidate], *, trace: Mapping[str, str] | None = None) -> list[Scored]:
@@ -96,13 +98,18 @@ class Engine:
         capture = self.config.record.capture_content and os.environ.get("HONE_CAPTURE_CONTENT") != "0"
         return Run(self.config, self.components, self.sink, self.cache, Budget(self.config.budget), capture)
 
-    def _run_attributes(self) -> dict[str, Any]:
-        config_json = canonical_json(self.config.model_dump(mode="json"))
-        return {
+    def _run_attributes(self, run: Run, task: Any = None) -> dict[str, Any]:
+        config = self.config.model_dump(mode="json")
+        config_json = canonical_json(config)
+        attributes: dict[str, Any] = {
             "hone.select.config_hash": hashlib.sha256(config_json.encode()).hexdigest()[:16],
+            "hone.select.config": config,  # what was tested (design change 0008)
             "hone.select.policy": self.config.select.policy,
             "hone.select.n": self.config.generate.n,
         }
+        if task is not None:
+            attributes["hone.select.task"] = run.content(as_text(task)[:TASK_PREVIEW])
+        return attributes
 
     def _generator(self) -> Component:
         generators = [c for c in self.components.values() if c.kind == "generator"]

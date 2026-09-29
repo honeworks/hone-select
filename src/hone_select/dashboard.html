@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hone-select runs</title>
+<style>
+  :root { --bg: #fff; --fg: #1d2330; --muted: #6b7280; --line: #e3e6ec; --head: #f5f6f8; --hi: #eef4ff;
+          --ok: #1a7f37; --bad: #c62828; --win: #fff6d6; --link: #2457c5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --fg: #e3e6ec; --muted: #9aa3b2; --line: #2a2f38; --head: #1b1f26; --hi: #1d2a40;
+            --ok: #4cc26b; --bad: #ef6b6b; --win: #3a3314; --link: #7aa5ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { display: flex; gap: 18px; align-items: baseline; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  header b { font-size: 16px; }
+  a { color: var(--link); text-decoration: none; cursor: pointer; }
+  main { padding: 16px 20px 60px; }
+  h2 { font-size: 16px; margin: 22px 0 8px; }
+  .muted { color: var(--muted); }
+  .bar { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  input, select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px;
+                  background: var(--bg); color: var(--fg); }
+  .wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
+           white-space: nowrap; }
+  th { background: var(--head); position: sticky; top: 0; cursor: pointer; user-select: none; font-weight: 600; }
+  th input { width: 100%; min-width: 60px; margin-top: 3px; font-weight: normal; }
+  tbody tr:hover { background: var(--hi); }
+  tr.clickable { cursor: pointer; }
+  tr.win { background: var(--win); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  pre { background: var(--head); padding: 10px; border-radius: 6px; overflow: auto; max-height: 360px;
+        white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .card div:first-child { color: var(--muted); font-size: 12px; }
+  details { margin: 6px 0; }
+  .detail td { white-space: normal; background: var(--head); }
+</style>
+</head>
+<body>
+<header>
+  <b>hone-select</b>
+  <a href="#/">Runs</a>
+  <a href="#/candidates">Candidates across runs</a>
+  <span class="muted" id="status"></span>
+</header>
+<main id="main"></main>
+<script>
+const main = document.getElementById("main");
+const esc = v => String(v ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const num = v => typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(3)) : (v ?? "—");
+const flat = v => v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+const time = s => s ? s.replace("T", " ").slice(0, 19) : "";
+const secs = (a, b) => a && b ? ((new Date(b) - new Date(a)) / 1000).toFixed(1) : "";
+async function get(path) {
+  const r = await fetch(path);
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+// A table: columns = [{key, label, get(row) -> value, html(row) -> cell html, num}], per-column filters,
+// click a header to sort, onRow(row, tr) for clicks. Returns nothing; renders into `el`.
+function table(el, columns, rows, onRow) {
+  const state = {sort: null, dir: 1, filters: {}};
+  el.innerHTML = `<div class="bar"><input placeholder="filter every column" size="36"> <span class="muted"></span></div>
+    <div class="wrap"><table><thead><tr>${columns.map((c, i) =>
+      `<th data-i="${i}">${esc(c.label)}<br><input data-f="${i}" placeholder="filter"></th>`).join("")}</tr></thead>
+    <tbody></tbody></table></div>`;
+  const [all, count] = [el.querySelector(".bar input"), el.querySelector(".bar span")];
+  const body = el.querySelector("tbody");
+  const value = (c, r) => c.get ? c.get(r) : r[c.key];
+  function render() {
+    const words = all.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = rows.filter(r => {
+      const cells = columns.map(c => flat(value(c, r)).toLowerCase());
+      return words.every(w => cells.some(t => t.includes(w))) &&
+        Object.entries(state.filters).every(([i, f]) => !f || cells[i].includes(f));
+    });
+    if (state.sort !== null) {
+      const c = columns[state.sort];
+      shown = [...shown].sort((a, b) => {
+        const [x, y] = [value(c, a), value(c, b)];
+        if (x === y) return 0; if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1;
+        return (typeof x === "number" && typeof y === "number" ? x - y : flat(x).localeCompare(flat(y))) * state.dir;
+      });
+    }
+    count.textContent = `${shown.length} of ${rows.length}`;
+    body.innerHTML = "";
+    for (const r of shown) {
+      const tr = document.createElement("tr");
+      if (r.winner === true) tr.className = "win";
+      if (onRow) tr.classList.add("clickable");
+      tr.innerHTML = columns.map(c => `<td class="${c.num ? "num" : ""}">${c.html ? c.html(r) : esc(c.num ? num(value(c, r)) : flat(value(c, r)))}</td>`).join("");
+      if (onRow) tr.onclick = () => onRow(r, tr);
+      body.appendChild(tr);
+    }
+  }
+  all.oninput = render;
+  el.querySelectorAll("th input").forEach(inp => {
+    inp.onclick = e => e.stopPropagation();
+    inp.oninput = () => { state.filters[inp.dataset.f] = inp.value.toLowerCase(); render(); };
+  });
+  el.querySelectorAll("th").forEach(th => th.onclick = () => {
+    const i = Number(th.dataset.i);
+    state.dir = state.sort === i ? -state.dir : 1; state.sort = i; render();
+  });
+  render();
+}
+
+const ctx = r => Object.entries(r.context || {}).map(([k, v]) => `${k.replace("hone.", "")}=${v}`).join(" ");
+
+async function showRuns() {
+  const runs = await get("/api/runs");
+  main.innerHTML = `<h2>Runs</h2><div id="t"></div>`;
+  table(document.getElementById("t"), [
+    {key: "start", label: "started", get: r => time(r.start)},
+    {key: "run_id", label: "run"},
+    {label: "context", get: ctx},
+    {key: "policy", label: "policy"},
+    {key: "n", label: "n", num: true},
+    {key: "candidate_count", label: "candidates", num: true},
+    {key: "rejected", label: "rejected", num: true},
+    {key: "winner", label: "winner", get: r => r.winner ?? "none"},
+    {key: "winner_total", label: "winner total", num: true},
+    {label: "fallback / escalated", get: r => [r.fallback ? "fallback" : "", r.escalated ? "escalated" : ""].join(" ").trim()},
+    {label: "seconds", get: r => Number(secs(r.start, r.end)), num: true},
+    {key: "status", label: "status", html: r => `<span class="${r.status === "error" ? "bad" : ""}">${esc(r.status)}</span>`},
+  ], runs, r => { location.hash = `#/run/${r.run_id}`; });
+}
+
+function candidateDetail(c) {
+  const scores = Object.entries(c.scores).map(([k, s]) =>
+    `<b>${esc(k)}</b>: ${num(s.value)}${s.confidence != null ? ` (confidence ${num(s.confidence)})` : ""}${s.cache_hit ? " · cached" : ""}` +
+    `${s.reason ? `<pre>${esc(flat(s.reason))}</pre>` : "<br>"}${s.error ? `<pre class="bad">${esc(flat(s.error))}</pre>` : ""}`).join("");
+  const gates = Object.entries(c.gates).map(([k, g]) =>
+    `<b>${esc(k)}</b>: <span class="${g.passed ? "ok" : "bad"}">${g.passed ? "passed" : "failed"}</span>` +
+    `${g.details ? `<pre>${esc(JSON.stringify(g.details, null, 2))}</pre>` : "<br>"}${g.error ? `<pre class="bad">${esc(g.error)}</pre>` : ""}`).join("");
+  return `${c.preview ? `<b>data preview</b><pre>${esc(c.preview)}</pre>` : ""}${gates ? `<h2>Gates</h2>${gates}` : ""}` +
+    `${scores ? `<h2>Scores</h2>${scores}` : ""}<details><summary>meta</summary><pre>${esc(JSON.stringify(c.meta, null, 2))}</pre></details>`;
+}
+
+async function showRun(id) {
+  const r = await get(`/api/runs/${id}`);
+  const cards = [["policy", r.policy], ["n", r.n], ["candidates", r.candidate_count], ["rejected", r.rejected],
+    ["winner", r.winner ?? "none"], ["winner total", num(r.winner_total)], ["seconds", secs(r.start, r.end)],
+    ["started", time(r.start)], ...Object.entries(r.budget).map(([k, v]) => [`budget ${k}`, num(v)]),
+    ...Object.entries(r.context).map(([k, v]) => [k.replace("hone.", ""), v])];
+  main.innerHTML = `<h2>Run ${esc(r.run_id)}</h2>
+    <div class="grid">${cards.map(([k, v]) => `<div class="card"><div>${esc(k)}</div><div>${esc(v)}</div></div>`).join("")}</div>
+    <h2>What was tested</h2>
+    <details open><summary>configuration</summary><pre>${r.config ? esc(JSON.stringify(r.config, null, 2)) : "not recorded (a run from before design change 0008)"}</pre></details>
+    <details><summary>task</summary><pre>${r.task ? esc(flat(r.task)) : "not recorded"}</pre></details>
+    <h2>Candidates</h2><p class="muted">Click a row for its data, gate details and every score's reason.</p><div id="t"></div>
+    ${r.pairwise.length ? `<h2>Pairwise judgements</h2><div id="p"></div>` : ""}
+    <h2>Decision trace</h2><div id="d"></div>
+    ${r.errors.length ? `<h2>Errors</h2><pre class="bad">${esc(r.errors.map(e => `${e.span}: ${e.message}`).join("\n"))}</pre>` : ""}`;
+  const cols = [
+    {key: "rank", label: "rank", num: true},
+    {key: "id", label: "candidate"},
+    ...r.columns.params.map(p => ({label: p, get: c => c.params[p]})),
+    ...r.columns.gates.map(g => ({label: `gate: ${g}`, get: c => c.gates[g] ? (c.gates[g].passed ? "pass" : "fail") : "",
+      html: c => c.gates[g] ? `<span class="${c.gates[g].passed ? "ok" : "bad"}">${c.gates[g].passed ? "pass" : "fail"}</span>` : ""})),
+    ...r.columns.scores.map(s => ({label: s, num: true, get: c => c.scores[s]?.value ?? null})),
+    {key: "total", label: "total", num: true},
+    {key: "stage_reached", label: "stage", num: true},
+    {key: "rejected", label: "rejected", get: c => c.rejected ? "yes" : ""},
+    {key: "winner", label: "winner", get: c => c.winner ? "★" : ""},
+  ];
+  table(document.getElementById("t"), cols, r.candidates, (c, tr) => {
+    if (tr.nextSibling && tr.nextSibling.classList.contains("detail")) { tr.nextSibling.remove(); return; }
+    const d = document.createElement("tr");
+    d.className = "detail";
+    d.innerHTML = `<td colspan="${cols.length}">${candidateDetail(c)}</td>`;
+    tr.after(d);
+  });
+  if (r.pairwise.length) table(document.getElementById("p"),
+    [{key: "a", label: "A"}, {key: "b", label: "B"}, {key: "choice", label: "choice"}, {key: "judge", label: "judge"}], r.pairwise);
+  table(document.getElementById("d"), [{key: "event", label: "event"},
+    {label: "details", get: e => Object.entries(e).filter(([k]) => k !== "event").map(([k, v]) => `${k}=${flat(v)}`).join("  ")}],
+    r.decision_trace);
+}
+
+async function showCandidates() {
+  const rows = await get("/api/candidates");
+  const params = [...new Set(rows.flatMap(c => Object.keys(c.params)))];
+  const scorers = [...new Set(rows.flatMap(c => Object.keys(c.scores)))];
+  main.innerHTML = `<h2>Candidates across runs</h2>
+    <div class="bar">Compare by <select id="g"><option value="">(choose a variation param)</option>
+      ${params.map(p => `<option>${esc(p)}</option>`).join("")}</select>
+      <span class="muted">candidates, wins and mean total per value, over the rows the filters below keep</span></div>
+    <div id="s"></div><h2>All candidates</h2><div id="t"></div>`;
+  let kept = rows;
+  const group = () => {
+    const key = document.getElementById("g").value;
+    const out = document.getElementById("s");
+    if (!key) { out.innerHTML = ""; return; }
+    const by = {};
+    for (const c of kept) {
+      const v = flat(c.params[key]);
+      const g = by[v] ??= {value: v, candidates: 0, wins: 0, totals: []};
+      g.candidates++; if (c.winner) g.wins++; if (typeof c.total === "number") g.totals.push(c.total);
+    }
+    const summary = Object.values(by).map(g => ({...g, win_rate: g.wins / g.candidates,
+      mean_total: g.totals.length ? g.totals.reduce((a, b) => a + b, 0) / g.totals.length : null}));
+    table(out, [{key: "value", label: key}, {key: "candidates", label: "candidates", num: true},
+      {key: "wins", label: "wins", num: true}, {key: "win_rate", label: "win rate", num: true},
+      {key: "mean_total", label: "mean total", num: true}], summary);
+  };
+  document.getElementById("g").onchange = group;
+  const cols = [
+    {key: "start", label: "run started", get: c => time(c.start)}, {key: "run_id", label: "run"},
+    {label: "context", get: c => ctx(c)}, {key: "id", label: "candidate"},
+    ...params.map(p => ({label: p, get: c => c.params[p]})),
+    ...scorers.map(s => ({label: s, num: true, get: c => c.scores[s] ?? null})),
+    {key: "total", label: "total", num: true}, {key: "rank", label: "rank", num: true},
+    {key: "winner", label: "winner", get: c => c.winner ? "★" : ""},
+  ];
+  // re-run the comparison whenever the table's filters change
+  const t = document.getElementById("t");
+  table(t, cols, rows, c => { location.hash = `#/run/${c.run_id}`; });
+  t.addEventListener("input", () => setTimeout(() => {
+    const ids = new Set([...t.querySelectorAll("tbody tr")].map(tr => tr.children[1].textContent + "|" + tr.children[3].textContent));
+    kept = rows.filter(c => ids.has(c.run_id + "|" + c.id)); group();
+  }));
+}
+
+async function route() {
+  const hash = location.hash || "#/";
+  document.getElementById("status").textContent = "loading…";
+  try {
+    if (hash.startsWith("#/run/")) await showRun(decodeURIComponent(hash.slice(6)));
+    else if (hash.startsWith("#/candidates")) await showCandidates();
+    else await showRuns();
+    document.getElementById("status").textContent = "";
+  } catch (e) {
+    main.innerHTML = `<pre class="bad">${esc(e.message)}</pre>`;
+    document.getElementById("status").textContent = "";
+  }
+}
+window.onhashchange = route;
+route();
+</script>
+</body>
+</html>
