@@ -2,9 +2,11 @@
 
 ## Status
 
-`proposed` (2026-09-29). Designed together with hone-models change
+`proposed` (2026-09-29). Designed together with hone-models changes
 [0016 machine state](https://github.com/honeworks/hone-models/blob/main/design/changes/0016-machine-state.md),
-which provides the machine probe; §6 uses its interface exactly. The dashboard parts (§12) follow the
+which provides the machine probe (§6 uses its interface exactly), and
+[0015 generation models](https://github.com/honeworks/hone-models/blob/main/design/changes/0015-generation-models.md),
+which makes ComfyUI's models registry entries. The dashboard parts (§12) follow the
 layout of design/decisions.md D-012.
 
 ## Context
@@ -77,6 +79,9 @@ models_on_gpu = true          # after a sample, the needed models must be fully 
 models = ["{setup.model}"]    # the models a python / command subject needs (§3); placeholders as in `command`
 gpu_lock = true               # hold the machine-wide GPU lock for the whole run (true: $HONE_GPU_LOCK or
                               # /tmp/honeworks-gpu.lock; or a path)
+if_busy = "block"             # another process holds a GPU lease or the lock: block (unload nothing, wait)
+                              # | unload (unload the unneeded models anyway); passed to the probe's prepare
+warm_up = true                # load the needed models before a group's first sample (probe's load), §6
 on_violation = "wait"         # wait (up to wait_timeout, then stop) | stop | record_only
 wait_timeout = 1800           # seconds one wait may last
 probe = "hone_models:machine" # optional; the built-in checks always run
@@ -141,7 +146,7 @@ the pilot is refused with the reason, so an estimate never comes from a busy mac
 
 | Subject | Needed models |
 |---|---|
-| `prompt` | the setup's `model` factor value (or `client_args.model` when there is no `model` factor) |
+| `prompt`, `generate` (0011) | the setup's `model` factor value (or `client_args.model` when there is no `model` factor) |
 | `python`, `command` | `[conditions] models`, placeholders filled from the sample (`"{setup.model}"`, `"{case.source_model}"`); none when not declared |
 | any, with `[conditions] models` | the declared list (it overrides the default) |
 
@@ -149,10 +154,10 @@ the pilot is refused with the reason, so an estimate never comes from a busy mac
 model loaded at all, which is what a render timing needs. Judges are not needed during generation; if a
 local judge is still loaded from an earlier run, `prepare` unloads it before the first sample.
 
-Names are hone-models registry ids (such as `gemma4-12b`), as the subject uses them; the probe maps them to
-the server's names and reports each loaded model's `model_id` (§6). `"comfyui"` in the list keeps ComfyUI's
-memory (an image or music experiment that renders through ComfyUI declares `models = ["comfyui"]`);
-without it `prepare` frees ComfyUI's memory like any other unneeded model.
+Names are hone-models registry ids (such as `gemma4-12b` or `ace-step-1.5-xl-turbo`), as the subject uses
+them; the probe maps them to the server's names and reports each loaded model's `model_id` (§6). ComfyUI's
+models are registry entries too (hone-models 0015), so an image or music experiment names its model like
+any other; `prepare` keeps ComfyUI's memory when every model it holds is needed and frees it otherwise.
 
 ### 4. Waiting, stopping and recording only
 
@@ -244,27 +249,39 @@ class MachineProbe(Protocol):
     #  "servers": [{"server": "ollama", "running": True, "error": None},
     #              {"server": "comfyui", "running": None, "error": "timeout"}],   # True | False | None
     #  "loaded_models": [{"server": "ollama", "name": "gemma4:12b-q4", "model_id": "gemma4-12b",
-    #                     "size_gb": 7.1, "vram_gb": 6.6}],          # ComfyUI's entry has name None
+    #                     "size_gb": 7.1, "vram_gb": 6.6},
+    #                    {"server": "comfyui", "name": "z-image-turbo.json", "model_id": "z-image-turbo",
+    #                     "size_gb": None, "vram_gb": None}],        # model_id None: a job hone-models did not run
     #  "gpu_lock": {"path": "/tmp/honeworks-gpu.lock", "held": True, "holder": "hone-flow pid 5120",
     #               "mine": False},
     #  "leases": [{"name": "gpu:tts", "pid": 5120, "gb": 3.0, "mine": False}]}
 
-    def prepare(self, needed: Sequence[str]) -> Mapping[str, Any]: ...
-    # Make sure only `needed` (registry ids, plus "comfyui") are loaded: unload the others, never load one,
-    # never wait. {"needed": [...], "blocked_by": [...] | None, "unloaded": [{"server", "name"}],
-    #              "released": [...], "errors": [...], "missing": [...], "loaded_models": [...],
-    #              "need_gb": 7.1}
+    def prepare(self, needed: Sequence[str], *, if_busy: str = "block") -> Mapping[str, Any]: ...
+    # Make sure only `needed` (registry ids) are loaded: unload the others, never load one, never wait.
+    # if_busy "block": unload nothing while another process holds a lease or the lock; "unload": anyway.
+    # {"needed": [...], "if_busy": "block", "blocked_by": [...] | None, "unloaded": [{"server", "name"}],
+    #  "released": [...], "errors": [...], "missing": [...], "loaded_models": [...], "need_gb": 7.1}
+
+    # Optional (hone-select checks with hasattr): warm a model up. hone-models 0016's mk.machine.load.
+    # def load(self, model_id: str) -> Mapping[str, Any]:
+    # {"model_id", "loaded": True | False | None, "seconds", "size_gb", "vram_gb", "error"}
 ```
 
 How hone-select reads the result:
 
-- **`blocked_by`** (another process holds the machine-wide lock or a GPU lease; hone-models unloads nothing
-  then): `only_needed_models` is `outside` with the reason ("blocked by lease gpu:tts, pid 5120"), so the
-  run waits or stops by `on_violation`. hone-select never unloads around a block.
+- **`blocked_by`** (another process holds the machine-wide lock or a GPU lease): with `if_busy = "block"`
+  (default) hone-models unloads nothing, and `only_needed_models` is `outside` with the reason ("blocked by
+  lease gpu:tts, pid 5120"), so the run waits or stops by `on_violation`. With `if_busy = "unload"` the
+  unneeded models are unloaded anyway and `blocked_by` is only recorded in the environment.
 - **`errors`** (an unload failed): `only_needed_models` is `outside`; when the error is a server that did
   not answer, it is `unknown`.
-- **`missing`** (a needed model is not loaded yet, since `prepare` never loads): the sample that follows is
-  marked `cold` in its environment (it includes the load time); see open question 9.
+- **`missing`** (a needed model is not loaded yet, since `prepare` never loads): with `warm_up = true` and a
+  probe that has `load`, hone-select calls `load(model_id)` for each missing model before the sample and
+  records the answer in the environment (`warm_up`: seconds, `vram_gb`); a `load` that answers
+  `loaded: None` (not supported: ComfyUI and `command` models, in-process models) or fails leaves the
+  sample `cold`. Without `warm_up` the sample that follows is marked `cold` in its environment (it
+  includes the load time); see open question 9. `load` answering `vram_gb < size_gb` is `models_on_gpu`
+  `outside` before the first sample, not after it.
 - **`need_gb` larger than `memory_total_gb`**: `models_on_gpu` is `outside` with the reason "the needed models
   do not fit in the GPU"; at plan time this is shown before approval.
 - **`prepare` raising** (for example an unknown registry id) at the first check refuses `start` with the
@@ -415,7 +432,7 @@ On the Experiments page (in the layout PR #6 lands):
 | AC-30 | Conditions in the definition and the plan | `[conditions]` is validated (unknown keys, bad values); `only_needed_models` / `models_on_gpu` without a probe, `min_free_vram_gb` for a prompt subject without a probe, `gpu_lock` with a `gpu-lock.sh` wrap and unresolvable `models` placeholders are `ConfigError`s that say what to change; `plan.json` shows the declared conditions, the needed models per setup and the current reading with `ok` / `outside` / `unknown` per check and what the run would do; `plan` unloads nothing; editing a condition makes the experiment a draft |
 | AC-31 | Waiting and stopping | with a scripted busy reading before a sample, `run.json` is `waiting` with the reasons and `status` reports `waiting`; `start` refuses a waiting experiment; when the reading turns good the run continues; `STOP` ends a wait; `wait_timeout` stops the run with `stopped_because`; `on_violation = "stop"` stops at once; `record_only` runs and marks; `start` resumes a stopped run; waiting time is in no sample's seconds or the budget |
 | AC-32 | The environment and the results | every sample's `result.json` has `environment` with before / after readings, checks and status, also without `[conditions]` (`not_checked`); a sample outside after it ran is set aside as `outside-1.json` and run once more, a second outside run is kept and marked; `outside` and `unknown` samples are left out of every number and of the selection, counted per setup and factor level with reasons; `report --include-outside` counts them and says so; old `result.json` files without an environment count as before |
-| AC-33 | Needed models, the probe and unknowns | `prepare` is called with the setup's model for a prompt subject, the declared `models` (placeholders filled) or nothing for python / command subjects, and unloads the previous group's model at a group change; `prepare`'s result (`blocked_by`, `unloaded`, `errors`, `missing`) is in the environment, `blocked_by` makes the run wait, `errors` is `outside` (or `unknown` for a server that did not answer), `missing` marks the sample `cold`; `min_free_vram_gb` does not count the needed models; `models_on_gpu` marks a partly offloaded model; `gpus: None` falls back to hone-select's own `nvidia-smi` reading, then `unknown`; a server with `running: None` makes the model checks `unknown`; a probe that raises gives `unknown` (the run waits); a declared check that cannot be measured refuses `start` with a message; `FakeMachineProbe` passes `check_machine_probe`; `probe = "hone_models:machine"` without hone-models is a `ConfigError` naming the extra |
+| AC-33 | Needed models, the probe and unknowns | `prepare` is called with the setup's model for a prompt subject, the declared `models` (placeholders filled) or nothing for python / command subjects, and unloads the previous group's model at a group change; `prepare`'s result (`blocked_by`, `unloaded`, `errors`, `missing`) is in the environment, `blocked_by` makes the run wait, `errors` is `outside` (or `unknown` for a server that did not answer), `missing` marks the sample `cold`; `min_free_vram_gb` does not count the needed models; `models_on_gpu` marks a partly offloaded model; `gpus: None` falls back to hone-select's own `nvidia-smi` reading, then `unknown`; a server with `running: None` makes the model checks `unknown`; `if_busy` is passed to `prepare` and `"unload"` unloads despite `blocked_by`; with `warm_up` a missing model is loaded through `load` and the sample is not `cold`, and a `load` that answers "not supported" leaves it `cold`; a probe that raises gives `unknown` (the run waits); a declared check that cannot be measured refuses `start` with a message; `FakeMachineProbe` passes `check_machine_probe`; `probe = "hone_models:machine"` without hone-models is a `ConfigError` naming the extra |
 | AC-34 | The GPU lock | with `gpu_lock`, another process cannot take the lock during the run (samples, waits and scoring) and can right after; the holder file is written and removed; a run whose lock is held elsewhere waits (visible in `run.json`) and stops at `wait_timeout`; with `HONE_GPU_LOCK_HELD=1` at start the lock is not taken again; subjects receive `HONE_GPU_LOCK_HELD=1`; the lock is released when the process is killed |
 | AC-35 | The dashboard | the list shows the `waiting` badge and reason; the experiment shows the run-conditions card, the plan's reading before approval and the waits; the sample panel shows the environment; outside samples are marked and the results say how many were not counted |
 
@@ -502,6 +519,7 @@ On the Experiments page (in the layout PR #6 lands):
    thresholds depend on the machine, so nothing is on by default). Or should `experiments new` turn it on
    for prompt subjects with a local client?
 9. **Cold first samples:** `prepare` never loads a model, so the first sample of each model group includes
-   the model's load time. Mark it `cold` in its environment and still count it (proposed: its output is
-   valid, only its time is not), leave cold samples out of the speed numbers only, or warm the model up
-   first (would need hone-models 0016's open question 5, `mk.machine.load`)?
+   the model's load time. hone-models 0016 now offers `load` (the owner accepted it there), so the
+   proposal is `warm_up = true` in the template: warm the model up first, and mark a sample `cold` only
+   when warm-up is not possible (ComfyUI and in-process models load during their first job), counting it
+   but leaving it out of the speed numbers. Agreed?
