@@ -7,7 +7,6 @@ point, design change 0010 §6) and ``guides = "hone_models:guides"`` in ``[gener
 
 from __future__ import annotations
 
-import dataclasses
 import importlib
 from collections.abc import Mapping
 from typing import Any, cast
@@ -60,28 +59,28 @@ def guides() -> ModelGuides:
 class _Guides:
     def __init__(self, hone_models: Any) -> None:
         self.mk = hone_models
+        errors = getattr(hone_models, "errors", None)
+        self.unknown: type[Exception] = getattr(errors, "ConfigError", LookupError)
 
     def guide(self, model_id: str) -> Mapping[str, Any] | None:
         try:
             found = self.mk.guide(model_id)
-        except getattr(self.mk, "ConfigError", LookupError):  # an id the registry does not know
+        except self.unknown:  # an id the registry does not know
             return None
         return None if found is None else _as_json(found, model_id)
 
 
-def _as_json(guide: object, model_id: str) -> dict[str, Any]:
-    """The guide's JSON form (a mapping, ``to_json()``, ``model_dump()`` or a dataclass), with its text."""
-    found: Any = guide
-    if isinstance(found, Mapping):
-        out: dict[str, Any] = dict(cast(Mapping[str, Any], found))
-    elif hasattr(found, "to_json"):
-        out = dict(found.to_json())
-    elif hasattr(found, "model_dump"):
-        out = dict(found.model_dump(mode="json"))
-    else:
-        out = dataclasses.asdict(found)
+def _as_json(guide: Any, model_id: str) -> dict[str, Any]:
+    """hone-models' ``ModelGuide.as_dict()`` (or a plain mapping), with its text; ``install`` becomes the
+    one command a person runs (``hone-models models install <id>``) and the steps it prints are kept as
+    ``install_commands``."""
+    out = dict(cast(Mapping[str, Any], guide)) if isinstance(guide, Mapping) else dict(guide.as_dict())
     as_text = getattr(guide, "as_text", None)
     if callable(as_text):
         out.setdefault("text", str(as_text()))
-    out.setdefault("install", f"hone-models models install {model_id}")
+    steps = out.get("install")
+    if isinstance(steps, list):
+        out["install_commands"] = steps
+    if not isinstance(steps, str):
+        out["install"] = f"hone-models models install {model_id}"
     return out

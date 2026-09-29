@@ -1,7 +1,6 @@
 """The ModelGuides port (design change 0011 §5): the fake passes the contract checker, the checker rejects
 broken shapes, and the hone_models:guides adapter over a stand-in hone_models module."""
 
-import dataclasses
 import sys
 import types
 from typing import Any
@@ -56,44 +55,39 @@ def test_the_checker_wants_none_for_an_unknown_model() -> None:
         check_model_guides(Everything())
 
 
-@dataclasses.dataclass
 class Guide:
-    id: str
-    summary: str
+    """Shaped like hone-models' ModelGuide: `as_dict()` and `as_text()`."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self.data = data
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self.data)
 
     def as_text(self) -> str:
-        return f"{self.id}: {self.summary}"
-
-
-class Dumped:
-    def model_dump(self, mode: str) -> dict[str, Any]:
-        return {"id": "dumped", "mode": mode}
-
-
-class Jsoned:
-    def to_json(self) -> dict[str, Any]:
-        return {"id": "jsoned", "install": "custom install"}
+        return f"{self.data['id']}: {self.data.get('summary')}"
 
 
 def _hone_models(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     module = types.ModuleType("hone_models")
+    errors = types.ModuleType("hone_models.errors")
 
-    class UnknownModelError(Exception):
+    class ConfigError(Exception):
         pass
 
     answers: dict[str, Any] = {
-        "ace": Guide("ace", "songs"),
-        "mapped": {"id": "mapped", "installed": "no"},
-        "dumped": Dumped(),
-        "jsoned": Jsoned(),
+        "ace": Guide({"id": "ace", "summary": "songs", "installed": "yes", "install": []}),
+        "qwen": Guide({"id": "qwen", "installed": "no", "install": ["hf download a b", "mv x y"]}),
+        "mapped": {"id": "mapped", "installed": "unknown"},
     }
 
     def guide(model_id: str) -> Any:
         if model_id not in answers:
-            raise UnknownModelError(f"unknown model {model_id!r}")
+            raise ConfigError(f"unknown model {model_id!r}")
         return answers[model_id]
 
-    module.ConfigError = UnknownModelError  # type: ignore[attr-defined]
+    errors.ConfigError = ConfigError  # type: ignore[attr-defined]
+    module.errors = errors  # type: ignore[attr-defined]
     module.guide = guide  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "hone_models", module)
     return module
@@ -106,16 +100,20 @@ def test_the_adapter_returns_the_json_form_with_text_and_install(monkeypatch: py
     assert source.guide("ace") == {
         "id": "ace",
         "summary": "songs",
-        "text": "ace: songs",
+        "installed": "yes",
         "install": "hone-models models install ace",
+        "install_commands": [],
+        "text": "ace: songs",
     }
+    qwen = source.guide("qwen")
+    assert qwen is not None
+    assert qwen["install"] == "hone-models models install qwen"
+    assert qwen["install_commands"] == ["hf download a b", "mv x y"]
     assert source.guide("mapped") == {
         "id": "mapped",
-        "installed": "no",
+        "installed": "unknown",
         "install": "hone-models models install mapped",
     }
-    assert source.guide("dumped")["mode"] == "json"  # type: ignore[index]
-    assert source.guide("jsoned")["install"] == "custom install"  # type: ignore[index]
     assert source.guide("nothing") is None
 
 
