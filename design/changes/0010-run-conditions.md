@@ -2,7 +2,7 @@
 
 ## Status
 
-`proposed` (2026-09-29). Designed together with hone-models changes
+`accepted` (2026-09-29, owner: "start implementing"; open questions take the proposed answers). Designed together with hone-models changes
 [0016 machine state](https://github.com/honeworks/hone-models/blob/main/design/changes/0016-machine-state.md),
 which provides the machine probe (§6 uses its interface exactly), and
 [0015 generation models](https://github.com/honeworks/hone-models/blob/main/design/changes/0015-generation-models.md),
