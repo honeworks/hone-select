@@ -8,7 +8,7 @@ one row per span, in SQLite WAL mode so several processes can write at once.
 
 | Span | Main attributes (all spans also carry `hone.schema_version` and the shared trace keys) |
 |---|---|
-| `hone.select.run` | `hone.select.config_hash`, `.policy`, `.n`, `hone.select.budget.*` |
+| `hone.select.run` | `hone.select.config_hash`, `hone.select.config` (the configuration), `hone.select.task` (task preview; content), `.policy`, `.n`, `hone.select.budget.*` |
 | `hone.select.generate` | `hone.select.candidate` (id, index, seed, params, meta) |
 | `hone.select.gate` | `hone.select.gate`, `hone.select.gate.passed`, `hone.select.gate.probability`, `hone.select.gate.details` (when the gate returned details; content) |
 | `hone.select.score` | `hone.scorer`, `hone.select.scorer_version`, `hone.select.score.value`, `.confidence`, `.reason`, `.error`, `hone.select.cache_hit`, `hone.select.image_keys` (a prompt judge that sends images) |
@@ -16,8 +16,11 @@ one row per span, in SQLite WAL mode so several processes can write at once.
 | `hone.select.decision` | `hone.select.ranked`, `hone.select.decision_trace`, `hone.select.winner_id`, `hone.select.escalated`, `hone.select.fallback_used` |
 
 Values over 64 KiB go to a `blobs` table by sha256. Anything that looks like an API key or bearer token is
-replaced with `***`. With `[record] capture_content = false` (or `HONE_CAPTURE_CONTENT=0`), candidate text,
-reasons and error messages are stored as hashes only.
+replaced with `***`, and so is every configuration value whose key is named like a key, token, secret,
+password, authorization or credential (for example `api_key` in a `[judges.*]` section; a harmless name
+such as `sort_key` is redacted too, on purpose). With `[record] capture_content = false` (or
+`HONE_CAPTURE_CONTENT=0`), candidate text, reasons, error messages, the task and the prompt text in the
+configuration (`criteria`, `anchors`) are stored as hashes only.
 
 Other sinks: `sink = "jsonl"` (one JSON span per line) or `"none"`; or pass any `RecordSink`
 (`emit`, `flush`, `close`) as `Engine(..., sink=...)`, such as `hone_select.testing.MemorySink`:
@@ -100,3 +103,31 @@ hone-select show <run_id> [--db ...] [--json]                              # eve
 `--registry` names a module (importable from the current folder) whose top-level decorated functions and
 scorer objects are registered. `--json` prints `run_id`, `trace_id`, `winner`, `ranked`, `decision` and
 `budget`. Errors print one `error: ...` line and exit with status 1.
+
+## The dashboard
+
+`hone-select dashboard` (extra `cli`) serves a small read-only web page over the span store, on
+`http://127.0.0.1:8788/` by default (`--port`, `--host`, `--db`, `--open`):
+
+- **Runs:** every run, newest first, with its policy, n, candidates, rejected, winner and total,
+  fallback / escalation, duration and the trace context it ran in (`hone.run_id`, `hone.item`, `hone.step`).
+  Type in the box above the table to filter every column, or in a column's own box; click a header to sort.
+- **A run:** what was tested (the configuration and the task), the budget used, and the candidate table:
+  variation params as columns, each gate's result, one column per scorer, total, rank, stage reached,
+  rejected and the winner (highlighted). Click a candidate for its data preview, gate details and every
+  score's reason or error. Pairwise judgements and the decision trace follow.
+- **Candidates across runs:** every candidate of every run in one table; *Compare by* a variation param
+  (for example `model`) gives candidates, wins, win rate and mean total per value, over the rows your
+  filters keep. This is how an experiment that varies models, temperatures or prompts is read.
+
+The same data is available in Python:
+
+```python
+from hone_select.dashboard import all_candidates, list_runs, run_detail
+
+runs = list_runs(".hone/select/spans.db")  # newest first
+detail = run_detail(".hone/select/spans.db", runs[0]["run_id"]) if runs else None
+```
+
+Runs recorded before the dashboard existed have no configuration or task on their run span; the page says
+"not recorded" and shows everything else.

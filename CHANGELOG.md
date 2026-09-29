@@ -11,9 +11,14 @@ First release. Design: [0001 initial design](design/changes/0001-initial-design.
 [0002 pass the trace context to components](design/changes/0002-trace-to-components.md), and the
 changes found in the demo apps: [0003](design/changes/0003-name-a-position-biased-pairwise-judge.md),
 [0004](design/changes/0004-gate-details.md), [0005](design/changes/0005-prompt-scorer-with-several-images.md),
-[0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md).
+[0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md),
+[0008](design/changes/0008-dashboard.md).
 
 ### Added (from the demo apps)
+- `hone-select dashboard`: a read-only web page over the span store (runs, one run's configuration, task
+  and candidate table, candidates across runs compared by variation param), and
+  `hone_select.dashboard.list_runs` / `run_detail` / `all_candidates`. The `hone.select.run` span records
+  `hone.select.config` and `hone.select.task` ([design change 0008](design/changes/0008-dashboard.md)).
 - `Engine.select(candidates) -> Result`: the `run()` twin for candidates you already have, keeping the
   decision trace, `run_id` and budget; `score()` stays as the short form returning `ranked`
   ([design change 0006](design/changes/0006-score-returns-the-decision.md)).

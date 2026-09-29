@@ -3,6 +3,7 @@
 hone-select run selection.toml --task task.json --registry mymodule [--json]
 hone-select explain <run_id> [--db .hone/select/spans.db]
 hone-select show <run_id> [--db ...] [--json]
+hone-select dashboard [--db ...] [--host 127.0.0.1] [--port 8788] [--open]
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import dataclasses
 import importlib
 import json
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -20,6 +22,7 @@ except ModuleNotFoundError as e:  # the command is installed with the core; type
     raise SystemExit("the hone-select command needs the cli extra: pip install 'hone-select[cli]'") from e
 
 from hone_select._records import hone_home, read_spans
+from hone_select.dashboard import make_server
 from hone_select.engine import Engine
 from hone_select.errors import ConfigError, HoneSelectError
 from hone_select.explain import explain_run, load_decision
@@ -114,6 +117,28 @@ def show(
     for s in spans:
         status = s["status"]["code"] + (f" ({s['status']['message']})" if s["status"]["message"] else "")
         typer.echo(f"{s['start_time']}  {s['name']}  {s['span_id']}  {status}")
+
+
+@app.command()
+def dashboard(
+    db: DbOption = None,
+    host: Annotated[str, typer.Option(help="address to listen on (localhost by default)")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="port; 0 picks a free one")] = 8788,
+    open_browser: Annotated[bool, typer.Option("--open", help="open the page in a browser")] = False,
+) -> None:
+    """Serve a read-only web dashboard of the runs in the span store (design change 0008)."""
+    store = _store(db)
+    server = make_server(store, host, port)
+    url = f"http://{host}:{server.server_port}/"
+    typer.echo(f"hone-select dashboard: {url}  (store {store}; Ctrl+C to stop)")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 def main() -> None:

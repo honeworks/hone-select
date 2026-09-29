@@ -95,6 +95,9 @@ that raises gives `Score(None, error=...)` and the run goes on: a failure is nev
   version, exact or embedding dedup, seeded variation schedules.
 - **Records:** every step is a span in `.hone/select/spans.db`; `hone-select explain <run_id>` rebuilds
   the decision from the store alone.
+- **Dashboard:** `hone-select dashboard` serves a read-only web page over the store: filterable runs, each
+  run's configuration, task and candidate table (variation params, gates, scores, winner, reasons), and
+  candidates across runs compared by any variation param.
 
 ## Use it with the rest of honeworks
 hone-select depends on no other honeworks package. The links are ports (`hone_select.ports`) and shared
@@ -111,7 +114,7 @@ records:
 - [Configuration](https://github.com/honeworks/hone-select/blob/main/docs/config.md): every `selection.toml` key
 - [Scorers](https://github.com/honeworks/hone-select/blob/main/docs/scorers.md): code, prompt, command and pairwise scorers
 - [Bring your own client](https://github.com/honeworks/hone-select/blob/main/docs/adapters.md): OpenAI, Ollama, LangChain, hone-models, your own
-- [Records and the CLI](https://github.com/honeworks/hone-select/blob/main/docs/records.md): the span store, trace context, `explain`
+- [Records and the CLI](https://github.com/honeworks/hone-select/blob/main/docs/records.md): the span store, trace context, `explain`, the dashboard
 - [Examples](https://github.com/honeworks/hone-select/blob/main/examples/README.md): one runnable, explained example per concept (What / How / Why), each executed by the test suite; the patterns to copy
 - [Design](https://github.com/honeworks/hone-select/blob/main/design/README.md): why the package exists, the [current design](https://github.com/honeworks/hone-select/blob/main/design/current.md) with its guarantees, and every [design change](https://github.com/honeworks/hone-select/tree/main/design/changes)
 - [Contributing](https://github.com/honeworks/hone-select/blob/main/CONTRIBUTING.md): setup, quality gates and conventions
