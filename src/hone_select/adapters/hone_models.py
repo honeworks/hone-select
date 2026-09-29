@@ -48,18 +48,22 @@ def guides() -> ModelGuides:
             'guides "hone_models:guides" needs hone-models; install hone-select[models], or remove `guides` '
             "from [generate] (then every need of a case is need_unknown)"
         ) from e
-    if not hasattr(hone_models, "guide"):
+    try:
+        unknown = importlib.import_module("hone_models.errors").ConfigError
+    except (ModuleNotFoundError, AttributeError):
+        unknown = None
+    if not hasattr(hone_models, "guide") or unknown is None:
         raise ConfigError(
             'guides "hone_models:guides" needs a hone-models with model guides (its change 0015); update '
             "hone-models, or remove `guides` from [generate]"
         )
-    return _Guides(hone_models)
+    return _Guides(hone_models, unknown)
 
 
 class _Guides:
-    def __init__(self, hone_models: Any) -> None:
+    def __init__(self, hone_models: Any, unknown: type[Exception]) -> None:
         self.mk = hone_models
-        self.unknown: type[Exception] = importlib.import_module("hone_models.errors").ConfigError
+        self.unknown = unknown  # hone-models' ConfigError: an id the registry does not know
 
     def guide(self, model_id: str) -> Mapping[str, Any] | None:
         try:
