@@ -22,6 +22,7 @@ PUBLIC_MODULES = {
     "hone_select.testing",
     "hone_select.ports",
     "hone_select.cache",
+    "hone_select.experiments",
     "hone_select.explain",
     "hone_select.adapters.openai",
     "hone_select.adapters.langchain",

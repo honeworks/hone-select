@@ -4,12 +4,12 @@ hone-select run selection.toml --task task.json --registry mymodule [--json]
 hone-select explain <run_id> [--db .hone/select/spans.db]
 hone-select show <run_id> [--db ...] [--json]
 hone-select dashboard [--db ...] [--host 127.0.0.1] [--port 8788] [--open]
+hone-select experiments new|plan|approve|deny|start|stop|status|list|report ...
 """
 
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import json
 import sys
 import webbrowser
@@ -25,27 +25,20 @@ from hone_select._records import hone_home, read_spans
 from hone_select.dashboard import make_server
 from hone_select.engine import Engine
 from hone_select.errors import ConfigError, HoneSelectError
+from hone_select.experiments.cli import app as experiments_app
 from hone_select.explain import explain_run, load_decision
-from hone_select.registry import KINDS, Component
+from hone_select.registry import module_items
 from hone_select.types import Result
 
 app = typer.Typer(help="Generate, score and select the best of N candidates.", no_args_is_help=True)
+app.add_typer(experiments_app, name="experiments")
 DbOption = Annotated[Path | None, typer.Option("--db", help="span store; default $HONE_HOME/select/spans.db")]
 
 
 def registry_items(module_name: str) -> list[Any]:
     """Every decorated function or scorer object defined at the top level of ``module_name``."""
     sys.path.insert(0, str(Path.cwd()))  # so `--registry mymodule` finds mymodule.py in the current folder
-    try:
-        module = importlib.import_module(module_name)
-    except ModuleNotFoundError as e:
-        raise ConfigError(f"cannot import registry module {module_name!r}: {e}; run from its folder") from e
-    return [
-        value
-        for value in vars(module).values()
-        if isinstance(value, Component)
-        or (not isinstance(value, type) and callable(value) and getattr(value, "kind", None) in KINDS)
-    ]
+    return module_items(module_name)
 
 
 def result_json(result: Result) -> dict[str, Any]:
@@ -122,15 +115,22 @@ def show(
 @app.command()
 def dashboard(
     db: DbOption = None,
+    project: Annotated[
+        Path, typer.Option("--project", help="project folder whose experiments/ to show (design change 0009)")
+    ] = Path("."),
     host: Annotated[str, typer.Option(help="address to listen on (localhost by default)")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="port; 0 picks a free one")] = 8788,
     open_browser: Annotated[bool, typer.Option("--open", help="open the page in a browser")] = False,
 ) -> None:
-    """Serve a read-only web dashboard of the runs in the span store (design change 0008)."""
-    store = _store(db)
-    server = make_server(store, host, port)
+    """Serve a web dashboard of the runs and experiments (design changes 0008, 0009)."""
+    store = db or hone_home() / "select" / "spans.db"
+    if db is not None and not db.exists():
+        raise HoneSelectError(f"no span store at {str(db)!r}; pass --db or set HONE_HOME")
+    server = make_server(store, host, port, project)
     url = f"http://{host}:{server.server_port}/"
-    typer.echo(f"hone-select dashboard: {url}  (store {store}; Ctrl+C to stop)")
+    typer.echo(
+        f"hone-select dashboard: {url}  (store {store}, experiments {project.resolve()}; Ctrl+C to stop)"
+    )
     if open_browser:
         webbrowser.open(url)
     try:

@@ -138,3 +138,12 @@ A design change: see [`changes/0002-trace-to-components.md`](changes/0002-trace-
 - **Reason:** users need a way to choose the cache file and to explain a stored run from Python; the docs
   already used both paths.
 - **Status:** **awaiting owner review** (widens the documented public API).
+
+## D-011: the dashboard checks the Host header only on a loopback bind  (2026-09-29)
+
+Bound to `127.0.0.1` / `localhost` / `::1` (the default), the dashboard answers only requests whose `Host`
+is its own loopback address and port: a DNS-rebinding page, which sends its own host name, gets 403 for
+reads and writes. Bound to another address (`--host 0.0.0.0`, a machine name), it is reached by LAN
+addresses and names it cannot list, so any `Host` is answered; writes still need the page's
+`X-Hone-Dashboard` header and, when present, an `http(s)` `Origin` on the same address as the `Host`.
+Binding to another address is the user's explicit choice to expose the page on the network.

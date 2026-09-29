@@ -4,6 +4,7 @@ sections, and `[judges.*]` clients loaded through the ``hone.decision_clients`` 
 from __future__ import annotations
 
 import dataclasses
+import importlib
 import inspect
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -101,6 +102,21 @@ def as_component(obj: Any) -> Component:
         version=str(getattr(obj, "version", "1")),
         judge_model=str(getattr(obj, "judge_model", "") or judge_model(getattr(obj, "judge", None))),
     )
+
+
+def module_items(module_name: str) -> list[Any]:
+    """Every decorated function or scorer object defined at the top level of ``module_name`` (imported from
+    ``sys.path``): what ``--registry`` and an experiment's ``registry = [...]`` load."""
+    try:
+        module = importlib.import_module(module_name)
+    except ModuleNotFoundError as e:
+        raise ConfigError(f"cannot import registry module {module_name!r}: {e}; run from its folder") from e
+    return [
+        value
+        for value in vars(module).values()
+        if isinstance(value, Component)
+        or (not isinstance(value, type) and callable(value) and getattr(value, "kind", None) in KINDS)
+    ]
 
 
 def load_registry(items: Iterable[Any]) -> dict[str, Component]:

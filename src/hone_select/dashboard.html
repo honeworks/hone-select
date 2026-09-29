@@ -27,6 +27,8 @@
   th, td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
            white-space: nowrap; }
   th { background: var(--head); position: sticky; top: 0; cursor: pointer; user-select: none; font-weight: 600; }
+  button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--head); color: var(--fg); cursor: pointer; }
+  textarea { font: inherit; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); padding: 6px; }
   th input { width: 100%; min-width: 60px; margin-top: 3px; font-weight: normal; }
   tbody tr:hover { background: var(--hi); }
   tr.clickable { cursor: pointer; }
@@ -47,6 +49,7 @@
   <b>hone-select</b>
   <a href="#/">Runs</a>
   <a href="#/candidates">Candidates across runs</a>
+  <a href="#/experiments">Experiments</a>
   <span class="muted" id="status"></span>
 </header>
 <main id="main"></main>
@@ -230,12 +233,153 @@ async function showCandidates() {
   }));
 }
 
+// ---- experiments (design change 0009) ----------------------------------------------------------------
+async function send(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-Hone-Dashboard": "1"},
+                               body: JSON.stringify(body)});
+  const out = await r.json();
+  if (!r.ok) throw new Error(out.error || r.statusText);
+  return out;
+}
+const badge = s => `<span class="${s === "denied" || s === "stopped" ? "bad" : s === "completed" || s === "approved" ? "ok" : ""}">${esc(s)}</span>`;
+const fileView = (eid, base, name) => {
+  const url = `/files/${encodeURIComponent(eid)}/${base}/${name.split("/").map(encodeURIComponent).join("/")}`;
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return `<div><img src="${url}" style="max-width:100%;max-height:420px"><br>${esc(name)}</div>`;
+  if (/\.(wav|mp3|ogg|flac|m4a)$/i.test(name)) return `<div><audio controls src="${url}"></audio> ${esc(name)}</div>`;
+  if (/\.(mp4|webm|mov)$/i.test(name)) return `<div><video controls src="${url}" style="max-width:100%;max-height:420px"></video><br>${esc(name)}</div>`;
+  return `<div><a href="${url}" target="_blank">${esc(name)}</a></div>`;
+};
+
+async function showExperiments() {
+  const rows = await get("/api/experiments");
+  main.innerHTML = `<h2>Experiments</h2><p class="muted">Create one with <code>hone-select experiments new "title"</code>,
+    then <code>plan</code> it; approve or deny it here; run it with <code>hone-select experiments start EID</code>.</p><div id="t"></div>`;
+  table(document.getElementById("t"), [
+    {key: "eid", label: "id"}, {key: "title", label: "title"},
+    {key: "status", label: "status", html: r => badge(r.status)},
+    {label: "progress", get: r => `${r.done}/${r.outputs ?? "?"}`},
+    {label: "decided", get: r => r.review ? `${r.review.decision} by ${r.review.by}` : ""},
+    {key: "question", label: "question"},
+  ], rows, r => { location.hash = `#/experiment/${r.eid}`; });
+}
+
+function reviewBox(x) {
+  if (x.status !== "proposed") return "";
+  return `<h2>Decision</h2><div class="card"><p>Read the plan below (what runs, how many outputs, the estimate), then decide.</p>
+    <textarea id="note" rows="2" style="width:100%" placeholder="note (required to deny)"></textarea>
+    <div class="bar"><button id="approve">Approve</button><button id="deny">Deny</button> <span id="rmsg" class="muted"></span></div></div>`;
+}
+
+function planView(x) {
+  const p = x.plan;
+  if (!p) return `<p class="muted">No plan yet: run <code>hone-select experiments plan ${esc(x.eid)}</code>.</p>`;
+  const e = p.estimate;
+  return `<div class="grid">${[["cases", p.cases.length], ["setups", Object.keys(p.setups).length], ["samples each", p.samples],
+    ["outputs", p.outputs], ["judge calls", p.judge_calls], ["estimated seconds", e.seconds ?? "?"], ["estimated $", e.money_usd ?? "?"]]
+    .map(([k, v]) => `<div class="card"><div>${esc(k)}</div><div>${esc(v)}</div></div>`).join("")}</div>
+    <p class="muted">estimate: ${esc(e.from)}</p>
+    <b>What runs</b><pre>${esc(p.commands.join("\n"))}</pre>
+    <b>Setups</b><div id="setups"></div>`;
+}
+
+function resultsView(x) {
+  const r = x.results;
+  if (!r) return "";
+  const best = r.best ? r.setups[r.best] : null;
+  return `<h2>Results</h2><p><b>Best setup:</b> ${esc(r.best)} ${best ? esc(JSON.stringify(best.params)) : ""}</p>
+    <div id="rsetups"></div>${Object.keys(r.factors).map(f => `<h2>By ${esc(f)}</h2><div id="rf-${esc(f)}"></div>`).join("")}
+    ${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}`;
+}
+
+const statCols = (first, key) => [
+  first,
+  {label: "total", num: true, get: s => s.total.mean}, {label: "low", num: true, get: s => s.total.low},
+  {label: "high", num: true, get: s => s.total.high}, {key: "pass_rate", label: "pass rate", num: true},
+  {key: "wins", label: "wins", num: true}, {key: "errors", label: "errors", num: true},
+];
+
+async function showExperiment(eid) {
+  const x = await get(`/api/experiments/${eid}`);
+  const humans = Object.keys(x.human || {});
+  main.innerHTML = `<h2>${esc(x.eid)}: ${esc(x.title)} ${badge(x.status)}</h2><p>${esc(x.question)}</p>
+    ${x.changed_since_plan ? `<p class="bad">The definition changed since the plan: plan it again before it can be approved.</p>` : ""}
+    ${reviewBox(x)}
+    ${x.reviews.length ? `<h2>Reviews</h2><div id="rev"></div>` : ""}
+    <h2>Plan</h2>${planView(x)}
+    ${humans.length ? `<h2>Rate</h2>${humans.map(h => `<a href="#/rate/${esc(x.eid)}/${esc(h)}">Rate: ${esc(x.human[h].question)}</a>`).join("<br>")}` : ""}
+    ${resultsView(x)}
+    <h2>Samples (${x.samples.length} of ${x.outputs ?? "?"})</h2><p class="muted">Click a sample for its output and files.</p><div id="smp"></div>
+    <details><summary>experiment.toml</summary><pre>${esc(x.definition)}</pre></details>`;
+  if (x.status === "proposed") {
+    const decide = async decision => {
+      try { await send(`/api/experiments/${eid}/review`, {decision, note: document.getElementById("note").value}); route(); }
+      catch (e) { document.getElementById("rmsg").textContent = e.message; }
+    };
+    document.getElementById("approve").onclick = () => decide("approve");
+    document.getElementById("deny").onclick = () => decide("deny");
+  }
+  if (x.reviews.length) table(document.getElementById("rev"), [{key: "decision", label: "decision"}, {key: "by", label: "by"},
+    {key: "at", label: "at"}, {key: "note", label: "note"}], x.reviews);
+  const factors = Object.keys(x.factors);
+  if (x.plan) table(document.getElementById("setups"), [{key: "id", label: "setup"}, ...factors.map(f => ({label: f, get: s => s[f]}))],
+    Object.entries(x.plan.setups).map(([id, s]) => ({id, ...s})));
+  if (x.results) {
+    const r = x.results;
+    table(document.getElementById("rsetups"), [...statCols({key: "id", label: "setup"}),
+      ...factors.map(f => ({label: f, get: s => s.params[f]}))], r.ranking.map(id => ({id, ...r.setups[id]})));
+    for (const [f, levels] of Object.entries(r.factors))
+      table(document.getElementById(`rf-${f}`), statCols({key: "level", label: f}), Object.entries(levels).map(([level, s]) => ({level, ...s})));
+    for (const [b, diffs] of Object.entries(r.baselines))
+      table(document.getElementById(`rb-${b}`), [{key: "id", label: "setup"}, {key: "diff", label: "difference", num: true},
+        {key: "low", label: "low", num: true}, {key: "high", label: "high", num: true}, {label: "clear", get: v => v.clear ? "yes" : "no"}],
+        Object.entries(diffs).map(([id, v]) => ({id, ...v})));
+  }
+  const scoreNames = [...new Set(x.samples.flatMap(s => Object.keys(s.scores)))];
+  const measureNames = [...new Set(x.samples.flatMap(s => Object.keys(s.measurements)))];
+  const cols = [{key: "case", label: "case"}, ...factors.map(f => ({label: f, get: s => s.params[f]})),
+    {key: "total", label: "total", num: true}, ...scoreNames.map(n => ({label: n, num: true, get: s => s.scores[n] ?? null})),
+    ...measureNames.map(n => ({label: n, num: true, get: s => s.measurements[n] ?? null})),
+    {label: "winner", get: s => s.winner ? "★" : ""}, {key: "error", label: "error"}];
+  table(document.getElementById("smp"), cols, x.samples, async (s, tr) => {
+    if (tr.nextSibling && tr.nextSibling.classList.contains("detail")) { tr.nextSibling.remove(); return; }
+    const [c, setup, k] = s.sample_id.split("__");
+    const base = `outputs/${c}/${setup}/${k}/files`;
+    const res = await fetch(`/files/${eid}/outputs/${c}/${setup}/${k}/result.json`).then(r => r.ok ? r.json() : null).catch(() => null);
+    const d = document.createElement("tr");
+    d.className = "detail";
+    const files = res ? Object.keys(res.files || {}) : [];
+    d.innerHTML = `<td colspan="${cols.length}"><b>${esc(s.sample_id)}</b>${res ? `<pre>${esc(flat(res.data))}</pre>
+      ${files.map(n => fileView(eid, base, n)).join("")}${res.log ? `<details><summary>log</summary><pre>${esc(res.log)}</pre></details>` : ""}` : ""}
+      <details><summary>scores and measurements</summary><pre>${esc(JSON.stringify({scores: s.scores, measurements: s.measurements, human: s.human}, null, 2))}</pre></details></td>`;
+    tr.after(d);
+  });
+}
+
+async function showRate(eid, criterion) {
+  const o = await get(`/api/experiments/${eid}/rate/${criterion}`);
+  if (!o) { main.innerHTML = `<h2>Everything is rated for ${esc(criterion)}.</h2><p><a href="#/experiment/${esc(eid)}">Back to ${esc(eid)}</a>; run <code>hone-select experiments report ${esc(eid)}</code> to include the ratings.</p>`; return; }
+  const [low, high] = o.scale;
+  const buttons = Array.from({length: high - low + 1}, (_, i) => low + i).map(v => `<button data-v="${v}" style="min-width:44px">${v}</button>`).join(" ");
+  main.innerHTML = `<h2>${esc(o.question)}</h2><p class="muted">${esc(eid)} · ${esc(criterion)} · ${o.total - o.remaining + 1} of ${o.total} · the setup is hidden</p>
+    <div class="card"><div class="muted">case ${esc(o.case)}</div>${o.data !== null && o.data !== undefined ? `<pre>${esc(flat(o.data))}</pre>` : ""}
+    ${o.files.map(n => fileView(eid, o.file_base, n)).join("")}</div>
+    <div class="bar">${esc(low)} = worst ${buttons} ${esc(high)} = best <span id="msg" class="muted"></span></div>
+    <p><a href="#/experiment/${esc(eid)}">Back to ${esc(eid)}</a></p>`;
+  main.querySelectorAll("button[data-v]").forEach(b => b.onclick = async () => {
+    try { await send(`/api/experiments/${eid}/rate`, {sample_id: o.sample_id, criterion, value: Number(b.dataset.v)}); route(); }
+    catch (e) { document.getElementById("msg").textContent = e.message; }
+  });
+}
+
 async function route() {
   const hash = location.hash || "#/";
   document.getElementById("status").textContent = "loading…";
   try {
     if (hash.startsWith("#/run/")) await showRun(decodeURIComponent(hash.slice(6)));
     else if (hash.startsWith("#/candidates")) await showCandidates();
+    else if (hash.startsWith("#/experiments")) await showExperiments();
+    else if (hash.startsWith("#/experiment/")) await showExperiment(decodeURIComponent(hash.slice(13)));
+    else if (hash.startsWith("#/rate/")) await showRate(...hash.slice(7).split("/").map(decodeURIComponent));
     else await showRuns();
     document.getElementById("status").textContent = "";
   } catch (e) {
