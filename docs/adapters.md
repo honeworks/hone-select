@@ -72,6 +72,14 @@ model, or to point an id at a tag you have pulled, add an entry to your registry
 [the hone-models registry docs](https://github.com/honeworks/hone-models/blob/main/docs/registry.md)).
 Other packages can register their own factories in the `hone.decision_clients` entry-point group.
 
+hone-models also provides the machine probe for an experiment's run conditions
+([experiments](experiments.md#run-conditions)): `probe = "hone_models:machine"` in `[conditions]` (the
+`hone.machine_probes` entry point) reports the loaded models and their VRAM and unloads the ones an
+experiment does not need. Without hone-models installed, planning such an experiment raises a
+`ConfigError` that names `hone-select[models]`. Any object with `snapshot()` and `prepare(needed, *,
+if_busy=...)` fits (`hone_select.ports.MachineProbe`); check yours with
+`hone_select.testing.check_machine_probe`, and use `FakeMachineProbe` in tests.
+
 ## Your own client and the contract checkers
 *Example: [`bring_your_own_client.py`](../examples/bring_your_own_client.py).*
 
@@ -79,7 +87,7 @@ Write a class with `decide(...)` and check it with the exported contract checker
 `hone_select.testing` pass the same checks and are handy in your tests.
 
 ```python
-from hone_select.testing import FakeDecisionClient, FakeEmbedder, FakeTextClient, contracts
+from hone_select.testing import FakeDecisionClient, FakeEmbedder, FakeMachineProbe, FakeTextClient, contracts
 
 
 class AlwaysYes:
@@ -98,6 +106,7 @@ class AlwaysYes:
 contracts.check_decision_client(AlwaysYes())
 contracts.check_decision_client(FakeDecisionClient(answers={"q1": "yes"}))
 contracts.check_text_client(FakeTextClient())
+contracts.check_machine_probe(FakeMachineProbe())
 contracts.check_embedder(FakeEmbedder())
 ```
 

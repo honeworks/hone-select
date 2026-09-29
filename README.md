@@ -99,7 +99,8 @@ that raises gives `Score(None, error=...)` and the run goes on: a failure is nev
   `experiments/E0001-.../experiment.toml`; `hone-select experiments plan` shows every run and an estimate,
   a person approves it (CLI or dashboard), `start` runs and resumes it, and the results say which setup,
   model, parameter or prompt wins, against a baseline, with intervals. The subject can be a prompt, your
-  Python function or any command.
+  Python function or any command. Run conditions keep a busy machine out of the numbers: the run waits
+  for free CPU, RAM and VRAM, unloads models it does not need, holds the GPU lock and marks every sample.
 - **Dashboard:** `hone-select dashboard` serves a local web page over the store and the experiments: filterable runs, each
   run's configuration, task and candidate table (variation params, gates, scores, winner, reasons), and
   candidates across runs compared by any variation param.

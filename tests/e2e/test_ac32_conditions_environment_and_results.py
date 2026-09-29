@@ -144,7 +144,6 @@ def test_ac32_old_results_without_an_environment_count_as_before(tmp_path: Path)
     assert res["setups"] == before["setups"]  # the same numbers
 
 
-
 def test_ac32_scorers_see_each_candidates_environment_status(tmp_path: Path) -> None:
     (tmp_path / "status_scorer.py").write_text(
         "from hone_select import scorer\n\n\n@scorer('in_conditions')\n"

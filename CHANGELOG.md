@@ -12,9 +12,18 @@ First release. Design: [0001 initial design](design/changes/0001-initial-design.
 changes found in the demo apps: [0003](design/changes/0003-name-a-position-biased-pairwise-judge.md),
 [0004](design/changes/0004-gate-details.md), [0005](design/changes/0005-prompt-scorer-with-several-images.md),
 [0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md),
-[0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md).
+[0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md),
+[0010](design/changes/0010-run-conditions.md).
 
 ### Added (from the demo apps)
+- Run conditions for experiments: `[conditions]` in `experiment.toml` declares the machine state a run
+  needs (CPU load, free RAM and VRAM, GPU utilization, only the needed models loaded and fully on the GPU,
+  the machine-wide GPU lock for the whole run); the run checks it between samples and waits, stops or
+  only records; every sample's `result.json` gains an `environment`; samples outside the conditions are
+  left out of the results (`experiments report --include-outside` counts them); the plan and the
+  dashboard show the conditions. New port `hone_select.ports.MachineProbe`, `FakeMachineProbe`,
+  `check_machine_probe`, and the `hone_models:machine` probe in the `hone.machine_probes` entry-point group
+  ([design change 0010](design/changes/0010-run-conditions.md)).
 - A redesigned dashboard: sidebar navigation, light and dark themes, experiment cards, an Overview that
   leads with the answer and a chart per setting, search / filter / sort on every table, details in a side
   panel, a keyboard-friendly rating screen, and `GET /api/info` (design/decisions.md D-012).
