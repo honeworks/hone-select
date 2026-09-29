@@ -65,6 +65,11 @@ def plan(
         typer.echo(f"runs: {command}")
     if "conditions" in p:
         typer.echo(f"run conditions now: {p['conditions']['now']['would']}")
+    for cell in p.get("applicability", {}).get("not_applicable", []):
+        typer.echo(f"not applicable: {cell['case']} x {cell['setup']}: {'; '.join(cell['unmet'])}")
+    for model, entry in p.get("models", {}).items():
+        if entry["installed"] == "no":
+            typer.echo(f"not installed: {model} (start refuses until it is): {entry['install']}")
     typer.echo("approve it in the dashboard or: hone-select experiments approve " + p["eid"])
 
 

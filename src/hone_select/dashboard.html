@@ -410,7 +410,7 @@ function decisionCard(x) {
   return `<div class="card callout warn"><div style="flex:1;min-width:280px">
       <b>This plan needs your decision.</b><div class="muted" style="margin-top:4px">It produces <b>${fmt(p.outputs)}</b> outputs (${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples} ${p.samples === 1 ? "sample" : "samples"})
       and ${fmt(p.judge_calls)} judge calls. Estimate: ${e.seconds === null ? "time unknown" : duration(e.seconds)}, ${e.money_usd === null ? "cost unknown" : "$" + fmt(e.money_usd)}.
-      See exactly what runs in the <a href="#/experiment/${esc(x.eid)}/plan">Plan</a> tab.${p.conditions ? ` Run conditions now: <b>${esc(p.conditions.now.would)}</b>.` : ""}</div>
+      See exactly what runs in the <a href="#/experiment/${esc(x.eid)}/plan">Plan</a> tab.${p.conditions ? ` Run conditions now: <b>${esc(p.conditions.now.would)}</b>.` : ""}${p.applicability?.not_applicable?.length ? ` <b>${p.applicability.not_applicable.length}</b> cells are not applicable (a model cannot do the case).` : ""}${Object.values(p.models || {}).some(m => m.installed === "no") ? ` <b style="color:var(--bad)">Some models are not installed.</b>` : ""}</div>
       <textarea id="note" rows="2" style="width:100%;margin-top:10px" placeholder="Note (required to deny)" aria-label="Note"></textarea></div>
     <div style="display:flex;gap:8px"><button class="btn primary" id="approve">Approve</button><button class="btn danger" id="deny">Deny</button></div></div>`;
 }
@@ -516,7 +516,8 @@ function resultsTab(x, el) {
   el.innerHTML = `${notCounted(r)}<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
     ${Object.keys(r.agreement || {}).length ? `<h2>Judge agreement</h2><div class="card kv">${Object.entries(r.agreement).map(([k, v]) => `<span>${esc(k)}</span><span>mean difference ${fmt(v)}</span>`).join("")}</div>` : ""}`;
   table($("rs"), [
-    ...factors.map(f => ({label: f, get: s => s.params[f]})),
+    ...factors.map(f => ({label: f, get: s => s.params[f], ...(f === "model" ? {html: s => esc(s.params[f]) + (s.asked_differently ? ` <span class="pill info" title="its model gets its own prompt or inputs">asked differently</span>` : "")} : {})})),
+    {label: "Cases", title: "applicable cases of all (a model cannot do some cases)", num: true, get: s => s.applicable?.cases, html: s => s.applicable ? `${s.applicable.cases} of ${s.applicable.of}${s.applicable.not_applicable ? ` <span class="muted" title="${esc(Object.keys(s.applicable.needs).join(", "))}">(${s.applicable.not_applicable} not applicable)</span>` : ""}` : ""},
     {label: "Total (95% interval)", num: true, get: s => s.total.mean, html: s => !s.samples && (s.outside || s.unknown) ? `<span class="muted">no samples in conditions</span>` : scorebar(s.total.mean, {low: s.total.low, high: s.total.high, win: s.id === r.best, max})},
     {key: "wins", label: "Wins", num: true}, {key: "pass_rate", label: "Pass rate", num: true, html: s => esc(pct(s.pass_rate))},
     {key: "errors", label: "Errors", num: true},
@@ -526,7 +527,8 @@ function resultsTab(x, el) {
   for (const [b, diffs] of Object.entries(r.baselines))
     table($(`rb-${b}`), [...factors.map(f => ({label: f, get: s => r.setups[s.id].params[f]})),
       {key: "diff", label: "Difference", num: true, html: s => esc(signed(s.diff))},
-      {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`}],
+      {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`},
+      {key: "shared_cases", label: "Shared cases", title: "the cases both setups can do", num: true}],
       Object.entries(diffs).map(([id, v]) => ({id, ...v})));
 }
 async function sampleDrawer(x, s) {
@@ -555,6 +557,24 @@ function samplesTab(x, el) {
       html: s => offConditions(s) ? `<span class="pill warn" title="${esc((s.off_conditions || []).join(", "))}">${esc(s.environment_status)}</span>` : s.error ? `<span class="pill bad" title="${esc(s.error)}">error</span>` : s.winner ? `<span class="pill accent">winner</span>` : ""}],
     x.samples, {onRow: s => sampleDrawer(x, s), rowClass: s => offConditions(s) ? "off" : s.winner ? "win" : "", empty: "No outputs yet."});
 }
+// ---- models: guides, how each model is asked, cells a model cannot do (design change 0011) ----
+function guideView(id, m) {
+  const g = m.guide, feats = (g?.features || []).map(f => `<span class="chip" title="${esc(f.how || "")}">${esc(f.name)}</span>`).join("");
+  const limits = ["sizes", "durations_s", "max_duration_s", "max_references"].filter(k => g?.[k] != null).map(k => `${k}: ${esc(JSON.stringify(g[k]))}`).join(" · ");
+  const inst = m.installed === "no" ? `<span class="pill bad">not installed</span> ${cmd(m.install)}` : `<span class="pill">installed: ${esc(m.installed)}</span>`;
+  const lic = m.commercial_use === false ? `<span class="pill warn">non-commercial</span>` : "";
+  return `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><b class="mono">${esc(id)}</b> ${inst} ${lic} <span class="muted">${esc(m.license || "")}</span>
+    ${g ? `<div>${esc(g.summary || "")}</div>${g.prompt ? `<div class="muted">Prompt: ${esc(g.prompt)}</div>` : ""}${feats ? `<div>${feats}</div>` : ""}${limits ? `<div class="muted">${limits}</div>` : ""}<div class="muted">${esc(g.source || "")} ${g.checked ? `checked ${esc(g.checked)}` : ""}</div>` : `<div class="muted">No guide for this model.</div>`}</div>`;
+}
+function modelsCard(x) {
+  const p = x.plan || {}, models = p.models || {}, asked = p.asked || {}, na = p.applicability?.not_applicable || [], unsure = p.applicability?.need_unknown || [];
+  if (!Object.keys(models).length && !Object.keys(asked).length && !na.length && !unsure.length) return "";
+  const guidesHtml = Object.keys(models).length ? `<div class="sub-h">Model guides</div>${Object.entries(models).map(([id, m]) => guideView(id, m)).join("")}` : "";
+  const askedHtml = Object.entries(asked).filter(([, a]) => a.asked_differently).map(([sid, a]) => `<li><span class="mono">${esc(sid)}</span> <span class="pill info">asked differently</span> prompt <span class="mono">${esc(a.prompt)}</span>, inputs <span class="mono">${esc(JSON.stringify(a.inputs))}</span>${Object.keys(a.case_overrides || {}).length ? `, case overrides: ${esc(Object.keys(a.case_overrides).join(", "))}` : ""}</li>`).join("");
+  const naHtml = na.length ? `<div class="sub-h">Not applicable: ${na.length} cells not run</div><ul>${na.map(c => `<li>${esc(c.case)} × <span class="mono">${esc(c.setup)}</span>: ${esc(c.unmet.join("; "))}</li>`).join("")}</ul>` : "";
+  const unsureHtml = unsure.length ? `<div class="sub-h">need_unknown: ${unsure.length} cells run without knowing</div><ul>${unsure.map(c => `<li>${esc(c.case)} × <span class="mono">${esc(c.setup)}</span>: ${esc(c.needs.join("; "))}</li>`).join("")}</ul>` : "";
+  return `<div class="card" style="margin-top:14px"><b>Models</b>${guidesHtml}${askedHtml ? `<div class="sub-h">How each model is asked</div><ul>${askedHtml}</ul>` : ""}${naHtml}${unsureHtml}</div>`;
+}
 function planTab(x, el) {
   const p = x.plan;
   if (!p) { el.innerHTML = `<div class="card callout"><div class="muted">No plan yet.</div>${cmd(`hone-select experiments plan ${x.eid}`)}</div>`; return; }
@@ -562,7 +582,7 @@ function planTab(x, el) {
   el.innerHTML = `<div class="grid">${[tile("Outputs", fmt(p.outputs), `${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples}`), tile("Judge calls", fmt(p.judge_calls)),
       tile("Estimated time", e.seconds === null ? "—" : duration(e.seconds)), tile("Estimated cost", e.money_usd === null ? "—" : "$" + fmt(e.money_usd)), tile("Subject", esc(p.subject))].join("")}</div>
     <p class="muted">Estimate: ${esc(e.from)}. Planned ${esc(when(p.planned_at))}.</p>
-    <h2>What runs</h2>${p.commands.map(c => `<pre>${esc(c)}</pre>`).join("")}${conditionsCard(x)}
+    <h2>What runs</h2>${p.commands.map(c => `<pre>${esc(c)}</pre>`).join("")}${conditionsCard(x)}${modelsCard(x)}
     <h2>Setups</h2><div id="ps"></div><h2>Test cases</h2><div class="card">${p.cases.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>`;
   const factors = Object.keys(x.factors), bases = new Set(Object.values(p.baselines));
   table($("ps"), [{key: "id", label: "Setup", html: s => `<span class="mono">${esc(s.id)}</span>${bases.has(s.id) ? ` <span class="pill info">baseline</span>` : ""}`},
@@ -579,7 +599,7 @@ async function showExperiment(eid, tab) {
   else if (tab === "results") resultsTab(x, el);
   else if (tab === "samples") samplesTab(x, el);
   else if (tab === "plan") planTab(x, el);
-  else if (tab === "definition") el.innerHTML = `<p class="muted" style="margin-top:0">The definition as written (values of secret-named keys are hidden).</p><pre style="max-height:none">${esc(x.definition)}</pre>`;
+  else if (tab === "definition") el.innerHTML = `<p class="muted" style="margin-top:0">The definition as written (values of secret-named keys are hidden).</p><pre style="max-height:none">${esc(x.definition)}</pre>${modelsCard(x)}`;
   else el.innerHTML = x.reviews.length ? `<div class="card">${x.reviews.slice().reverse().map(r => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--border)"><div>${pill(r.decision)} <b>${esc(r.by)}</b> <span class="muted">${esc(r.note || "")}</span></div><span class="muted">${esc(when(r.at))}</span></div>`).join("")}</div>` : `<div class="card empty">No decisions yet.</div>`;
   if (x.status === "proposed" && x.plan) {
     const decide = async decision => {

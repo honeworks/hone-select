@@ -19,6 +19,14 @@ from hone_select.experiments.project import read_json, write_json
 from hone_select.registry import gate, module_items, scorer
 from hone_select.types import Candidate, GateResult, Score, Scored
 
+MODEL_META = (
+    "error_kind",
+    "cost_estimated",
+    "license",
+    "commercial_use",
+    "asked_differently",
+    "need_unknown",
+)
 SMALL = 20 * 1024 * 1024  # keep_files = "small": files above this are hashed, then deleted
 
 
@@ -153,7 +161,11 @@ def _candidate(folder: Path, r: dict[str, Any]) -> Candidate:
         "measurements": measurements,
         "error": r.get("error"),
         "environment_status": environment_status(r),
+        "case": r.get(
+            "judge_view", r.get("case_fields", {})
+        ),  # never a model's override (design change 0011)
     }
+    meta |= {k: r[k] for k in MODEL_META if k in r}
     return Candidate(r["sample_id"], r.get("data") if r.get("data") is not None else "", files, meta)
 
 

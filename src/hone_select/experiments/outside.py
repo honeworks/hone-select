@@ -63,3 +63,12 @@ def conditions_line(res: dict[str, Any]) -> str:
     if c.get("not_checked"):
         line += f" {c['not_checked']} of {total} samples were not checked (they ran before the conditions)."
     return line.strip()
+
+
+def out_of_memory(env: dict[str, Any], out: dict[str, Any], spec: d.ExperimentSpec) -> dict[str, Any]:
+    """A generation that ran out of memory is a run-conditions signal (design change 0011 §1): with
+    declared conditions the sample is `outside` (the machine was short), so it runs once more."""
+    if out.get("error_kind") != "out_of_memory" or not spec.conditions.declared():
+        return env
+    check = {"state": "outside", "reason": f"out_of_memory: {out.get('error')}"}
+    return env | {"status": "outside", "checks": {**env["checks"], "out_of_memory": check}}

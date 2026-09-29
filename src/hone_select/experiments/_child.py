@@ -24,7 +24,7 @@ def main() -> int:
     payload = json.loads(sys.stdin.read())
     sys.path[:0] = payload["paths"]  # the project root, then the experiment's scripts/
     os.chdir(payload["paths"][0])
-    ctx = Ctx(Path(payload["workdir"]), payload["seed"], payload["case"]["files"])
+    ctx = Ctx(Path(payload["workdir"]), payload["seed"], payload["case"]["files"], payload.get("model_guide"))
     out: dict[str, Any]
     try:
         value = import_object(payload["function"])(payload["case"], payload["setup"], ctx)

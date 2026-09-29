@@ -22,15 +22,25 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class GenerateSpec(_Model):
-    """`[generate]`: the subject under test (design change 0009 §2a)."""
+class PerModelSpec(_Model):
+    """`[generate.per_model."<model>"]`: how one model is asked (design change 0011 §2)."""
 
-    kind: Literal["prompt", "python", "command"]
-    client: str | None = None  # prompt: "module:factory" returning a TextClient
+    prompt: str | None = None  # replaces [generate] prompt for this model
+    inputs: dict[str, Any] = Field(default_factory=dict[str, Any])  # merged over [generate] inputs
+
+
+class GenerateSpec(_Model):
+    """`[generate]`: the subject under test (design change 0009 §2a, 0011 §1)."""
+
+    kind: Literal["prompt", "python", "command", "generate"]
+    client: str | None = None  # prompt / generate: "module:factory" or an entry-point name
     client_args: dict[str, Any] = Field(default_factory=dict[str, Any])
     prompt: str = "{prompt}"  # prompt: a template, or "{prompt}" to take the file named by the factor
     system: str | None = None
-    output: Literal["text", "json"] = "text"
+    output: str = "text"  # prompt: "text" | "json"; generate: the output file name in the workdir
+    inputs: dict[str, Any] = Field(default_factory=dict[str, Any])  # generate: named inputs, placeholders
+    per_model: dict[str, PerModelSpec] = Field(default_factory=dict[str, PerModelSpec])
+    guides: str | None = None  # a `hone.model_guides` entry point or "module:factory" (design change 0011)
     params: list[str] | None = (
         None  # prompt: factors passed to the model call (default: all but model/prompt)
     )
@@ -152,10 +162,18 @@ def load(folder: Path) -> ExperimentSpec:
 
 def _check(spec: ExperimentSpec) -> None:
     g = spec.generate
-    needed = {"prompt": g.client, "python": g.function, "command": g.command}[g.kind]
-    if not needed:
-        field = {"prompt": "client", "python": "function", "command": "command"}[g.kind]
+    field = {"prompt": "client", "python": "function", "command": "command", "generate": "client"}[g.kind]
+    if not getattr(g, field):
         raise ConfigError(f"[generate] kind = {g.kind!r} needs `{field}`")
+    if g.kind == "prompt" and g.output not in ("text", "json"):
+        raise ConfigError(f'[generate] output of a prompt subject is "text" or "json", not {g.output!r}')
+    if g.kind == "generate" and (Path(g.output).is_absolute() or ".." in Path(g.output).parts):
+        raise ConfigError(f"[generate] output {g.output!r} must be a file name inside the sample's folder")
+    if g.per_model and g.kind not in ("prompt", "generate"):
+        raise ConfigError(
+            "[generate.per_model] applies to prompt and generate subjects; a python or command subject "
+            "reads setup['model'] itself"
+        )
     if spec.design.kind == "list" and not spec.setup:
         raise ConfigError('design kind = "list" needs [[setup]] entries')
     for base in spec.baseline:

@@ -11,6 +11,7 @@ import getpass
 import json
 import os
 import re
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -88,14 +89,23 @@ class Project:
     def plan(self, eid: str, *, pilot: bool = False, sources: Any = None) -> dict[str, Any]:
         """Validate, expand every cell, estimate, and write `plan.json` (status: proposed). `sources`: where
         the run-condition reading comes from (default: this machine)."""
-        from hone_select.experiments import conditions, guard, needs, selection, subjects  # noqa: PLC0415
+        from hone_select.experiments import (  # noqa: PLC0415
+            applicable,
+            conditions,
+            needs,
+            selection,
+            subjects,
+        )
 
         folder, spec, cases = self.load(eid)
         setups = d.setups(spec)
         src = sources or conditions.DEFAULT
         needs.check_definition(spec, cases, setups)
         selection.check_criteria(spec, self.root)
-        outputs = len(cases) * len(setups) * spec.samples
+        aware = applicable.plan_parts(spec, cases, setups, folder)
+        skip = applicable.skipped(aware)
+        cells = [(c, s) for s in setups for c in cases if (c["id"], d.setup_id(s)) not in skip]
+        outputs = len(cells) * spec.samples
         plan: dict[str, Any] = {
             "eid": folder.name.split("-", 1)[0],
             "title": spec.title,
@@ -115,16 +125,27 @@ class Project:
                 "money_usd": None,
                 "from": "unknown (run `plan --pilot` to measure)",
             },
-        }
+        } | aware
         section = needs.plan_section(spec, cases, setups, src)
         if section is not None:
             plan["conditions"] = section
-        if pilot:
-            with guard.pilot(spec, folder, needs.needed(spec, cases[0], setups[0]), src):
-                sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
+        if pilot and cells:
+            sample = self._pilot(spec, folder, cells[0], plan, src)
             plan |= {"pilot": sample, "estimate": _estimate(sample, outputs)}
         write_json(folder / "plan.json", plan)
         return plan
+
+    def _pilot(
+        self, spec: d.ExperimentSpec, folder: Path, cell: tuple[Any, Any], plan: dict[str, Any], src: Any
+    ) -> dict[str, Any]:
+        """One sample of the first applicable cell, under the run's rules (`plan --pilot`)."""
+        from hone_select.experiments import guard, guides, needs, subjects  # noqa: PLC0415
+
+        case, setup = cell
+        with guard.pilot(spec, folder, needs.needed(spec, case, setup), src):
+            scratch = Path(tempfile.mkdtemp(prefix="hone-pilot-"))
+            where = subjects.Where(self.root, folder, scratch, guides.for_setup(plan, setup))
+            return subjects.pilot(spec, case, setup, where)
 
     def review(self, eid: str, decision: str, note: str = "", by: str | None = None) -> dict[str, Any]:
         """Approve or deny the current plan (`review.json` keeps every decision)."""

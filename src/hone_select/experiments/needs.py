@@ -16,7 +16,7 @@ ACTIONS = {"wait": "wait", "stop": "refuse to start", "record_only": "run and ma
 
 def needed(spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any]) -> list[str]:
     """The registry ids a sample needs loaded: `[conditions] models` (placeholders filled), else the prompt
-    subject's model, else none."""
+    or generate subject's model, else none."""
     c, g = spec.conditions, spec.generate
     if c.models is not None:
         values = subjects.placeholders(case, setup, subjects.Where(Path(), Path(), Path()), spec.seed)
@@ -30,7 +30,7 @@ def needed(spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any]) ->
                     '"{setup.<factor>}" or "{case.<field>}"'
                 ) from e
         return out
-    if g.kind == "prompt":
+    if g.kind in ("prompt", "generate"):
         model = setup.get("model", g.client_args.get("model"))
         return [str(model)] if model is not None else []
     return []
@@ -61,10 +61,10 @@ def check_definition(spec: ExperimentSpec, cases: list[dict[str, Any]], setups: 
     for key in ("only_needed_models", "models_on_gpu"):
         if getattr(c, key) and not c.probe:
             raise ConfigError(f"[conditions] {key} needs a probe: {fix} `{key}`")
-    if c.min_free_vram_gb is not None and spec.generate.kind == "prompt" and not c.probe:
+    if c.min_free_vram_gb is not None and spec.generate.kind in ("prompt", "generate") and not c.probe:
         raise ConfigError(
-            "[conditions] min_free_vram_gb with a prompt subject needs a probe (its own model stays loaded "
-            f"and would count as used): {fix} `min_free_vram_gb`"
+            f"[conditions] min_free_vram_gb with a {spec.generate.kind} subject needs a probe (its own model "
+            f"stays loaded and would count as used): {fix} `min_free_vram_gb`"
         )
     if gpulock.lock_path(c.gpu_lock) is not None and any("gpu-lock.sh" in w for w in spec.generate.wrap):
         raise ConfigError(
