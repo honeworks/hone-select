@@ -142,3 +142,18 @@ def test_ac32_old_results_without_an_environment_count_as_before(tmp_path: Path)
     assert res["setups"][LARGE]["samples"] == 2
     assert res["conditions"]["excluded"] == 0
     assert res["setups"] == before["setups"]  # the same numbers
+
+
+
+def test_ac32_scorers_see_each_candidates_environment_status(tmp_path: Path) -> None:
+    (tmp_path / "status_scorer.py").write_text(
+        "from hone_select import scorer\n\n\n@scorer('in_conditions')\n"
+        "def in_conditions(c):\n    return 1.0 if c.meta['environment_status'] == 'ok' else 0.0\n"
+    )
+    exp = CONDITIONS_EXPERIMENT.format(conditions=CPU).replace('"subjects"]', '"subjects", "status_scorer"]')
+    exp = exp.replace('scorers = ["length"]', 'scorers = ["length", "in_conditions"]')
+    machine = FakeMachine(tmp_path)
+    p, folder = ready(tmp_path, exp, machine.sources())
+    start(p, "E0001", sources=machine.sources())
+    selection = json.loads((folder / "outputs" / "keeper" / "selection.json").read_text())
+    assert {s["scores"]["in_conditions"]["value"] for s in selection["samples"].values()} == {1.0}
