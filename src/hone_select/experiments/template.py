@@ -55,6 +55,14 @@ scorers = []                          # code, command, prompt-judge and human sc
 # question = "How much do you like it?"
 # scale = [1, 5]
 
+# [scorers.owner_pick]                # a person picks the better of two outputs of one case, blind
+# kind = "ab"
+# question = "Which one would you rather use?"
+# between = "top"                     # "top" (best by the total) | "baseline" | ["setup id", "today"]
+# top = 2                             # with "top": how many setups (3 = three pairs of setups)
+# pairs = 20                          # pairs to judge per pair of setups
+# allow_tie = true
+
 [budget]
 # money_usd = 10
 # seconds = 36000

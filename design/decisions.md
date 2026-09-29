@@ -313,3 +313,55 @@ Reason: the owner asked for a simple, modern and useful page; the answer and the
   `shared_cases`. `results.json` also has `models` (license, `commercial_use`) and `could_not`.
 - **Reason:** the most direct reading of the record; a setup's own number and a fair head-to-head are both
   shown with their counts.
+
+## D-027: when the A/B pairs are drawn  (2026-09-29)
+
+- **Question:** 0012 §2: the draw is fixed "when the pairs become available"; with `between = "top"` that
+  is after generation and automatic scoring. The record does not say who draws, or when a list or
+  `"baseline"` is available.
+- **Choice:** for every kind of `between`, the pairs are available when every case of the plan has its
+  `selection.json` (the run has generated and scored everything). The first `report` after that draws
+  them (the run's own report, so `top` uses the ranking without outside samples); an experiment reported
+  before this version draws them at the first request of the A/B screen, from `results.json`'s ranking.
+  `ab_plan.json` records the plan's definition hash; a new plan draws again.
+- **Reason:** one moment for every `between`, with the outputs complete, so a list never misses samples
+  that were still running; no second trigger in the runner.
+
+## D-028: pairing details  (2026-09-29)
+
+- **Question:** 0012 §2 fixes the same case, "the sample with the same index when both have it", an even
+  spread and a seeded left / right, but not what happens when indices do not match or pairs run short.
+- **Choice:** per case, the pairs with the same sample index come first; when one setup failed a sample
+  and the other failed a different one, the samples left over are paired in index order. Cases are taken
+  round robin in a seeded order, one pair each per round, until `pairs` or no pair is left; fewer pairs
+  than `pairs` means all of them (`planned` < `requested` in the results). Left / right is a seeded coin
+  per pair, and the list is shuffled across pairs of setups. The seed is `"<seed>:ab:<criterion>"`.
+  `complete` is true when every planned pair has a pick.
+- **Reason:** the most direct reading of the record; a short list stays usable and says so.
+
+## D-029: naming setups in `between`  (2026-09-29)
+
+- **Question:** 0012 §1: `between` lists "setup names / baselines", but setups have ids, not names.
+- **Choice:** a name is a setup id (as in `plan.json`), a baseline's `name`, or a `[[setup]]` entry's
+  `name` (design `list`); two names for the same setup count once, and fewer than two setups is a
+  `ConfigError` at plan time, as is `between = "baseline"` without a baseline. With a list, every two
+  listed setups are a pair (listed order); with `"baseline"`, every other setup against the first
+  baseline, in ranking order; with `"top"`, every two of the best `top` setups, the better one first. The
+  `ab` and `human` sections are validated when the definition is read.
+- **Reason:** ids are unambiguous and already shown in the plan; baseline and `[[setup]]` names are the
+  readable forms a definition already has.
+
+## D-030: the A/B API and results shape  (2026-09-29)
+
+- **Question:** 0012 §3-5: the API must never expose setup names, and the results need "wins, losses and
+  ties of each side".
+- **Choice:** the API names a pair by its index in the criterion's plan: `GET .../ab/<criterion>` returns
+  `{state: "waiting" | "done" | "pair", index, question, allow_tie, case, case_fields, left: {data, files},
+  right: {...}, judged, total, can_undo}` (case fields are the shared `judge_view`), and a side's files come
+  from `GET .../ab/<criterion>/<index>/<left|right>/<path>` (a sample path would name the setup). A pair is
+  picked once (undo first); undo removes the criterion's last pick. In `results.json` each pair of setups
+  lists the one with more wins first (plan order on a draw) with `sides` (wins, losses, ties per setup) and
+  that setup's `win_rate`, `low`, `high`; the winner per case is the setup with more wins there, or `tie`.
+  The summary line says "beats" or "is even with", and "N of M picks so far" while unfinished.
+- **Reason:** the index is all the page needs; reading the leader first matches how the summary line and a
+  decision rule ("the winner if its win rate is at least 60 %") are read.

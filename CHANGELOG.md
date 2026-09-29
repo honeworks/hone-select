@@ -13,9 +13,16 @@ changes found in the demo apps: [0003](design/changes/0003-name-a-position-biase
 [0004](design/changes/0004-gate-details.md), [0005](design/changes/0005-prompt-scorer-with-several-images.md),
 [0006](design/changes/0006-score-returns-the-decision.md), [0007](design/changes/0007-pairwise-over-images.md),
 [0008](design/changes/0008-dashboard.md), [0009](design/changes/0009-experiments.md),
-[0010](design/changes/0010-run-conditions.md), [0011](design/changes/0011-model-aware-experiments.md).
+[0010](design/changes/0010-run-conditions.md), [0011](design/changes/0011-model-aware-experiments.md),
+[0012](design/changes/0012-ab-judgement.md).
 
 ### Added (from the demo apps)
+- A/B judgement for experiments: a `kind = "ab"` criterion shows a person two outputs of the same case
+  from two setups, blind, on the dashboard's new A/B screen (Left / Tie / Right, keys ←, T, →, undo); pairs
+  come from the best setups, a list or every setup against the baseline, are spread over the cases, seeded
+  and fixed in `ab_plan.json`; picks go to `ab.jsonl`; `results.json` and `summary.md` report wins, losses,
+  ties and the win rate with a 95 % Wilson interval per pair of setups, `clear`, `complete` and the winner
+  per case ([design change 0012](design/changes/0012-ab-judgement.md)).
 - Model-aware experiments: a `kind = "generate"` subject calls an image, music or video client per sample
   (`client = "hone_models:music"`, or any `module:factory`) with the sample's seed, an output file in its
   folder, case files as paths, and keeps the files, `elapsed_s`, cost, `error_kind`, license and

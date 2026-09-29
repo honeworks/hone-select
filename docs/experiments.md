@@ -187,6 +187,8 @@ example every `model`, averaged over the other factors) and against each **basel
 - `human`: the mean rating per human criterion, how many outputs are rated, and whether `min_ratings` is
   reached;
 - against a baseline: the difference in total with its interval, and `clear` when the interval excludes 0;
+- `ab`: per A/B criterion and pair of setups, the picks and the win rate (see
+  [A/B](#ab-pick-the-better-of-two-blind));
 - `agreement`: the mean difference between scorer pairs listed in `compare`.
 
 Each case's selection is also in the span store with `hone.run_id = <EID>` and `hone.item = <case>`, so the
@@ -429,11 +431,86 @@ commands), **Approve / Deny** with a note while it is proposed, its reviews, res
 factor and baseline, and every sample with its output, files (images, audio and video play inline),
 log and run conditions; a **Run conditions** card with the declared conditions, the plan's reading, the
 last reading and the waits; a **Models** card (in Plan and Definition) with each model's guide, whether
-it is installed, how each setup's model is asked and the cells not run; a `waiting` badge with its reason; and **Rate** for each human criterion, one output at a time, blind to the setup. After rating, run
-`hone-select experiments report E0001` to include the ratings in the results.
+it is installed, how each setup's model is asked and the cells not run; a `waiting` badge with its reason; **Rate** for each human criterion, one output at a time, blind to the setup; and **A/B** for each
+`ab` criterion, two outputs side by side, blind (see [A/B](#ab-pick-the-better-of-two-blind)). After rating
+or picking, run `hone-select experiments report E0001` to include the ratings and picks in the results.
 
 One run at a time: `start` refuses an experiment that is running or waiting (stop it first) or completed (run
 `report` to recompute its results). A run that crashed or was killed shows as stopped, and `start` resumes it.
 
 A plan is approved for one definition: editing `experiment.toml`, `cases/`, `prompts/` or `scripts/` makes
 the experiment a draft again, and it needs a new plan and a new approval before it can start.
+
+## A/B: pick the better of two, blind
+
+A rating says how good one output is; an A/B pick says which of two is better, which is faster to decide and
+more reliable when two setups are close. An `ab` criterion shows a person two outputs for the same case, one
+from each setup, without saying which is which, and counts the picks.
+
+```toml
+[scorers.owner_pick]
+kind = "ab"
+question = "Which premise would you rather see as a video?"
+between = "top"        # "top": the best setups by the automatic total (default)
+                       # or a list of setup ids, baseline names or [[setup]] names: ["hemmingway-1-1.0-3f2a1c", "today"]
+                       # or "baseline": every setup against the first baseline
+top = 2                # with between = "top": how many setups (2 = one pair; 3 = three pairs)
+pairs = 20             # pairs to judge per pair of setups (default 20)
+allow_tie = true       # default true
+```
+
+An `ab` criterion is not part of the automatic total, and it need not be listed in `[criteria] scorers`.
+Unknown names in `between` fail at `plan` time.
+
+- **Pairs.** A pair is the same case from both setups, the sample with the same index when both have it;
+  failed samples and samples outside the run conditions are never shown. The pairs are spread over the cases
+  as evenly as possible (8 cases and 20 pairs: 2 or 3 per case), and which setup is on the left is random
+  per pair, seeded by the experiment's `seed`. They are drawn once, when the run is done and scored (the
+  best setups are known then), and fixed in `ab_plan.json`, so stopping and coming back continues the same
+  list. When fewer pairs exist than `pairs`, all of them are used.
+- **The screen.** The Overview has an **A/B** button next to **Rate** for each `ab` criterion: the question,
+  the two outputs side by side (text, JSON, images, audio and video), **Left**, **Tie** (when allowed) and
+  **Right**, also on the keys ←, T and →, the progress and an undo of the last pick. Nothing on it names a
+  model, a setup or a prompt. Before the run is done it says "A/B: waiting for the run".
+- **Storage.** `ab.jsonl`, one line per pick: `{"criterion", "pair": [setup_a, setup_b], "case", "left",
+  "right", "choice": "left" | "right" | "tie", "at"}` (`left` and `right` are sample ids); an undo appends
+  `{"undo": <line index>}`.
+- **Results.** `hone-select experiments report` adds `ab` to `results.json`: per criterion and pair of
+  setups (the one with more wins first), `sides` with the wins, losses and ties of each, the `win_rate`
+  without ties with a 95 % Wilson interval (`low`, `high`), `clear` when the interval excludes 50 %,
+  `judged`, `planned`, `requested`, `complete` when every planned pair has a pick, and the winner per case
+  (`cases`). `summary.md` gets a line per pair:
+
+```text
+A/B (owner_pick): hemmingway-1-1.0-3f2a1c beats styletune-31b-1.0-9c0d4e, 14-5 with 1 tie, win rate 74 % (51-88 %), clear.
+```
+
+The same picks from Python, as the dashboard makes them:
+
+```python
+from hone_select.experiments import ab, report
+from hone_select.experiments import definition
+
+pick = project.new("Story length, A/B")
+definition_text = (folder / "experiment.toml").read_text()
+(pick / "experiment.toml").write_text(
+    definition_text.replace('title = "Story length"', 'title = "Pick a length"\nsamples = 2')
+    + '[scorers.owner_pick]\nkind = "ab"\nquestion = "Which story is better?"\npairs = 4\n'
+)
+(pick / "cases" / "cases.toml").write_text(
+    '[[case]]\nid = "keeper"\ntopic = "The keeper"\n[[case]]\nid = "ferry"\ntopic = "The ferryman"\n'
+)
+eid = pick.name.split("-")[0]
+project.plan(eid)
+project.review(eid, "approved", note="four pairs")
+start(project, eid)
+
+spec = definition.load(pick)
+while (shown := ab.next_pair(pick, spec, "owner_pick"))["state"] == "pair":
+    longer = "left" if len(str(shown["left"]["data"])) >= len(str(shown["right"]["data"])) else "right"
+    ab.add(pick, spec, "owner_pick", shown["index"], longer)  # the person prefers the longer story
+res = report(pick, spec, json.loads((pick / "plan.json").read_text()))
+[pair] = res["ab"]["owner_pick"]["pairs"]
+assert pair["complete"] and pair["sides"][pair["setups"][0]]["wins"] == 4
+print([line for line in (pick / "results" / "summary.md").read_text().splitlines() if "A/B (" in line][0])
+```
