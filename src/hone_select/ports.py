@@ -18,6 +18,7 @@ __all__ = [
     "DecisionClient",
     "Embedder",
     "MachineProbe",
+    "ModelGuides",
     "Question",
     "RecordSink",
     "ScoreCache",
@@ -117,3 +118,17 @@ class MachineProbe(Protocol):
 
     def snapshot(self) -> Mapping[str, Any]: ...
     def prepare(self, needed: Sequence[str], *, if_busy: str = "block") -> Mapping[str, Any]: ...
+
+
+class ModelGuides(Protocol):
+    """What each model can take (design change 0011 §5), provided by hone-models (``mk.guide``); any object
+    with this shape fits.
+
+    ``guide(model_id)`` returns the model's guide as JSON, or ``None`` for a model the source does not know:
+    ``{"id", "kind", "summary", "prompt", "inputs", "features": [{"name", "how", "input", "examples",
+    "source"}], "source", "checked", "license", "commercial_use", "sizes", "durations_s", "max_duration_s",
+    "max_references", "installed": "yes" | "no" | "unknown", "install": "<command to run>"}``. Every key is
+    optional; an unknown value is ``None``, never 0.
+    """
+
+    def guide(self, model_id: str) -> Mapping[str, Any] | None: ...

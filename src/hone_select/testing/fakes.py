@@ -246,3 +246,23 @@ class FakeMachineProbe:
                 }
             )
         return answer
+
+
+class FakeModelGuides:
+    """A ``ModelGuides`` source (design change 0011 §5) answering from scripted guides.
+
+    ``guides`` maps model id -> its guide (any keys of the documented shape); ``guide(id)`` returns a copy
+    with ``id`` set, or ``None`` for a model it does not know. Every call is kept in ``calls``.
+
+    >>> FakeModelGuides({"z-image": {"features": [{"name": "camera angle"}]}}).guide("z-image")["id"]
+    'z-image'
+    """
+
+    def __init__(self, guides: Mapping[str, Mapping[str, Any]] | None = None) -> None:
+        self.guides = {k: dict(v) for k, v in (guides or {}).items()}
+        self.calls: list[str] = []
+
+    def guide(self, model_id: str) -> dict[str, Any] | None:
+        self.calls.append(model_id)
+        found = self.guides.get(model_id)
+        return None if found is None else json.loads(json.dumps({"id": model_id, **found}, default=str))

@@ -12,6 +12,7 @@ __all__ = [
     "check_decision_client",
     "check_embedder",
     "check_machine_probe",
+    "check_model_guides",
     "check_record_sink",
     "check_text_client",
     "example_span",
@@ -117,3 +118,31 @@ def check_machine_probe(probe: Any) -> None:
     for key in ("unloaded", "errors", "missing", "loaded_models"):
         if key in prepared:
             assert isinstance(prepared[key], list), f"prepare()[{key!r}] must be a list"
+
+
+UNKNOWN_MODEL = "hone-select-contract-check-no-such-model"
+
+
+def check_model_guides(source: Any, known: str | None = None) -> None:
+    """``guide()`` of an unknown model is ``None``; the guide of ``known`` (a model the source knows) is a
+    mapping of the documented shape (design change 0011 §5). Every key is optional."""
+    assert source.guide(UNKNOWN_MODEL) is None, "guide() of an unknown model must be None"
+    if known is None:
+        return
+    answer = source.guide(known)
+    assert isinstance(answer, Mapping), "guide() of a known model must be a mapping"
+    g = cast(Mapping[str, Any], answer)
+    assert g.get("id", known) == known, "the guide's id is the model id"
+    if g.get("features") is not None:
+        _list_of_mappings(g["features"], "features")
+        for feature in cast(list[Mapping[str, Any]], g["features"]):
+            assert isinstance(feature.get("name"), str), "features[].name is a string"
+    assert g.get("installed", "unknown") in ("yes", "no", "unknown"), 'installed is "yes", "no" or "unknown"'
+    assert g.get("commercial_use") in (True, False, None), "commercial_use is True, False or None"
+    for key in ("max_duration_s", "max_references"):
+        value = g.get(key)
+        assert value is None or (isinstance(value, int | float) and not isinstance(value, bool)), (
+            f"{key} is a number or None"
+        )
+    for key in ("sizes", "durations_s"):
+        assert g.get(key) is None or isinstance(g[key], list), f"{key} is a list or None"
