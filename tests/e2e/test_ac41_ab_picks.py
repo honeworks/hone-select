@@ -78,6 +78,9 @@ def test_ac41_bad_picks_are_refused(served: tuple[str, Path]) -> None:
     ):
         assert call(url, body, PAGE)[0] == 400
     assert call(url + "/undo", {"criterion": "owner_pick"}, PAGE)[0] == 400  # nothing to undo
+    status, reply = call(url, {"criterion": "owner_pick"}, PAGE)
+    assert status == 400
+    assert "needs criterion, index, choice" in str(reply)  # a clear message, not a KeyError
     assert call(url, {"criterion": "owner_pick", "index": pair["index"], "choice": "left"}, PAGE)[0] == 200
     again = {"criterion": "owner_pick", "index": pair["index"], "choice": "right"}
     assert call(url, again, PAGE)[0] == 400  # a pair is picked once (undo first)

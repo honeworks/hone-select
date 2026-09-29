@@ -100,6 +100,8 @@ def test_a_client_resolves_through_its_entry_point_group(monkeypatch: pytest.Mon
     assert generation.factory("json:dumps") is json.dumps  # not an entry point: "module:factory"
     with pytest.raises(ConfigError, match="cannot import"):
         generation.factory("no_such_module:video")  # neither an entry point nor importable
+    with pytest.raises(ConfigError, match="hone_models"):
+        generation.factory("hone_models:no_such_factory")  # a hone_models: name that does not resolve
 
 
 def test_a_client_that_cannot_be_built_is_a_config_error() -> None:

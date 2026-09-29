@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from hone_select._records import scrub
 from hone_select.engine import SECRET_KEY
-from hone_select.errors import HoneSelectError
+from hone_select.errors import ConfigError, HoneSelectError
 from hone_select.experiments import ab, ratings, results
 from hone_select.experiments import definition as d
 from hone_select.experiments.project import Project, read_json
@@ -145,9 +145,13 @@ def post(project: Project, path: str, body: bytes) -> Reply:
 
 def _pick(project: Project, parts: list[str], data: dict[str, Any]) -> Reply:
     """An A/B pick, or the undo of the last one."""
+    undo = parts[4:] == ["undo"]
+    needed = ("criterion",) if undo else ("criterion", "index", "choice")
+    if any(k not in data for k in needed):
+        raise ConfigError(f"an A/B {'undo' if undo else 'pick'} needs {', '.join(needed)}")
     folder = project.path(parts[2])
     spec = d.load(folder)
-    if parts[4:] == ["undo"]:
+    if undo:
         ab.undo(folder, spec, str(data["criterion"]))
     else:
         ab.add(folder, spec, str(data["criterion"]), int(data["index"]), str(data["choice"]))
