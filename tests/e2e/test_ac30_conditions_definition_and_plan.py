@@ -121,3 +121,20 @@ def test_ac30_a_pilot_on_a_busy_machine_is_refused(tmp_path: Path) -> None:
     quiet = FakeMachine(tmp_path / "quiet")
     plan = p.plan("E0001", pilot=True, sources=quiet.sources())
     assert plan["pilot"]["error"] is None
+
+
+def test_ac30_the_template_has_a_valid_commented_conditions_block(tmp_path: Path) -> None:
+    from hone_select.experiments import Project
+
+    folder = Project(tmp_path).new("Template")
+    text = (folder / "experiment.toml").read_text()
+    assert "# [conditions]" in text
+    assert "# warm_up = true" in text
+    block = text[text.index("# [conditions]") :]
+    uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
+    import tomllib
+
+    spec = d.ConditionsSpec.model_validate(tomllib.loads(uncommented)["conditions"])
+    assert spec.warm_up is True
+    assert spec.probe == "hone_models:machine"
+    assert d.load(folder).conditions == d.ConditionsSpec()  # commented out: nothing is checked by default

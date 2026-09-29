@@ -58,4 +58,20 @@ scorers = []                          # code, command, prompt-judge and human sc
 
 [run]
 order = "model"                       # run every cell of one model before the next
+
+# The state of the machine this experiment needs (checked before and after every sample) ---------------
+# [conditions]
+# max_cpu_load = 0.5                  # share of all CPU cores busy, over one second between samples
+# min_free_ram_gb = 8
+# min_free_vram_gb = 7                # free on GPU 0, not counting the models this experiment needs
+# max_gpu_utilization_pct = 20
+# only_needed_models = true           # unload the other models (needs `probe`)
+# models_on_gpu = true                # the needed models must be fully in VRAM (needs `probe`)
+# models = ["{{setup.model}}"]        # the models a python / command subject needs
+# gpu_lock = true                     # hold the machine-wide GPU lock for the whole run
+# if_busy = "block"                   # block | unload: another process holds a GPU lease or the lock
+# warm_up = true                      # load the needed model before a group's first sample
+# on_violation = "wait"               # wait | stop | record_only
+# wait_timeout = 1800                 # seconds one wait may last
+# probe = "hone_models:machine"       # model state from hone-models (hone-select[models])
 """
