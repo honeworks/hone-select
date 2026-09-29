@@ -87,11 +87,11 @@ class Project:
 
     def plan(self, eid: str, *, pilot: bool = False) -> dict[str, Any]:
         """Validate, expand every cell, estimate, and write `plan.json` (status: proposed)."""
-        from hone_select.experiments import runner, subjects  # noqa: PLC0415 - runner imports this module
+        from hone_select.experiments import selection, subjects  # noqa: PLC0415 - they import this module
 
         folder, spec, cases = self.load(eid)
         setups = d.setups(spec)
-        runner.check_criteria(spec, self.root)
+        selection.check_criteria(spec, self.root)
         outputs = len(cases) * len(setups) * spec.samples
         plan: dict[str, Any] = {
             "eid": folder.name.split("-", 1)[0],
