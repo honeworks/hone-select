@@ -14,6 +14,15 @@ from typing import Any
 
 from hone_select.experiments import definition as d
 from hone_select.experiments import ratings
+from hone_select.experiments.outside import (
+    EXCLUDED,
+    SPEED,
+    conditions_line,
+    counts,
+    environment_status,
+    is_cold,
+    off_conditions,
+)
 from hone_select.experiments.project import now, read_json, write_json
 
 RESAMPLES = 1000
@@ -28,7 +37,9 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
         selection = read_json(case_dir / "selection.json", {"samples": {}, "winner": None})
         for p in sorted(case_dir.glob("*/*/result.json")):
             r = read_json(p)
-            s = selection["samples"].get(r["sample_id"], {})
+            s = selection["samples"].get(r["sample_id"]) or selection.get("outside", {}).get(
+                r["sample_id"], {}
+            )
             out.append(
                 {
                     "sample_id": r["sample_id"],
@@ -43,6 +54,9 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
                     "measurements": r.get("measurements", {}),
                     "cost_usd": r.get("cost_usd"),
                     "human": human.get(r["sample_id"], {}),
+                    "environment_status": environment_status(r),
+                    "cold": is_cold(r),
+                    "off_conditions": off_conditions(r.get("environment")),
                 }
             )
     return out
@@ -88,10 +102,27 @@ def _stats(rs: Sequence[dict[str, Any]], spec: d.ExperimentSpec, seed: int) -> d
             for c, h in spec.human_scorers().items()
         },
         "measurements": {
-            m: _round(_mean(_case_means(rs, lambda r, m=m: r["measurements"].get(m))))
+            m: _round(_mean(_case_means(rs, lambda r, m=m: _measure(r, m))))
             for m in {k for r in rs for k in r["measurements"]}
         },
         "cost_usd": _known_sum(r["cost_usd"] for r in rs),
+    }
+
+
+def _measure(r: dict[str, Any], name: str) -> Any:
+    """A measurement; None for the speed of a cold sample (design change 0010, open question 9)."""
+    return None if r["cold"] and name in SPEED else r["measurements"].get(name)
+
+
+def _counted(
+    rs: Sequence[dict[str, Any]], spec: d.ExperimentSpec, seed: int, include: bool
+) -> dict[str, Any]:
+    """`_stats` over the samples that count, plus how many were left out."""
+    kept = [r for r in rs if include or r["environment_status"] not in EXCLUDED]
+    return {
+        **_stats(kept, spec, seed),
+        "outside": sum(r["environment_status"] == "outside" for r in rs),
+        "unknown": sum(r["environment_status"] == "unknown" for r in rs),
     }
 
 
@@ -129,16 +160,26 @@ def _agreement(rs: list[dict[str, Any]], pairs: list[list[str]]) -> dict[str, fl
     return out
 
 
-def compute(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[str, Any]:
-    rs = rows(folder, spec)
+def compute(
+    folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any], *, include_outside: bool = False
+) -> dict[str, Any]:
+    """The results; samples outside the run conditions are left out of every number unless
+    `include_outside` (design change 0010 §10)."""
+    every = rows(folder, spec)
+    rs = [r for r in every if include_outside or r["environment_status"] not in EXCLUDED]
     setups: dict[str, dict[str, Any]] = plan["setups"]
     per_setup = {
-        sid: {"params": params, **_stats([r for r in rs if r["setup"] == sid], spec, spec.seed)}
+        sid: {
+            "params": params,
+            **_counted([r for r in every if r["setup"] == sid], spec, spec.seed, include_outside),
+        }
         for sid, params in setups.items()
     }
     per_factor = {
         f: {
-            str(level): _stats([r for r in rs if r["params"].get(f) == level], spec, spec.seed)
+            str(level): _counted(
+                [r for r in every if r["params"].get(f) == level], spec, spec.seed, include_outside
+            )
             for level in levels
         }
         for f, levels in spec.factors.items()
@@ -165,21 +206,34 @@ def compute(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[
             for name, base in plan["baselines"].items()
         },
         "agreement": _agreement(rs, spec.criteria.compare),
+        "samples": len(every),
+        "conditions": counts(every, spec, include_outside),
     }
 
 
-def report(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[str, Any]:
+def report(
+    folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any], *, include_outside: bool = False
+) -> dict[str, Any]:
     """Compute the results and write `results/results.json` and `results/summary.md`."""
-    res = compute(folder, spec, plan)
+    res = compute(folder, spec, plan, include_outside=include_outside)
     write_json(folder / "results" / "results.json", res)
     (folder / "results" / "summary.md").write_text(summary(res))
     return res
 
 
+def _total(s: dict[str, Any]) -> str:
+    t = s["total"]
+    if not s["samples"] and (s.get("outside") or s.get("unknown")):
+        return "no samples in conditions"
+    return f"{t['mean']} ({t['low']} to {t['high']})"
+
+
 def summary(res: dict[str, Any]) -> str:
+    first = conditions_line(res)
     lines = [
         f"# {res['eid']}: {res['title']}",
         "",
+        *([first, ""] if first else []),
         res["question"],
         "",
         f"**Best setup:** `{res['best']}` {res['setups'][res['best']]['params'] if res['best'] else ''}",
@@ -191,11 +245,7 @@ def summary(res: dict[str, Any]) -> str:
     ]
     for sid in res["ranking"]:
         s = res["setups"][sid]
-        t = s["total"]
-        lines.append(
-            f"| `{sid}` | {s['params']} | {t['mean']} ({t['low']} to {t['high']}) | {s['pass_rate']} | "
-            f"{s['wins']} |"
-        )
+        lines.append(f"| `{sid}` | {s['params']} | {_total(s)} | {s['pass_rate']} | {s['wins']} |")
     for factor, levels in res["factors"].items():
         lines += [
             "",
@@ -205,10 +255,7 @@ def summary(res: dict[str, Any]) -> str:
             "|---|---|---|---|",
         ]
         for level, s in levels.items():
-            t = s["total"]
-            lines.append(
-                f"| {level} | {t['mean']} ({t['low']} to {t['high']}) | {s['pass_rate']} | {s['wins']} |"
-            )
+            lines.append(f"| {level} | {_total(s)} | {s['pass_rate']} | {s['wins']} |")
     for name, diffs in res["baselines"].items():
         lines += [
             "",

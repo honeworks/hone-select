@@ -2,7 +2,7 @@
 
 Status comes from the files, never from a stored flag that could disagree with them:
 no `plan.json` -> draft; a plan for an older definition -> draft (plan again); plan, no decision -> proposed;
-the last decision on this plan -> approved / denied; `run.json` -> running / stopped / completed.
+the last decision on this plan -> approved / denied; `run.json` -> running / waiting / stopped / completed.
 """
 
 from __future__ import annotations
@@ -85,12 +85,15 @@ class Project:
 
     # -- plan and review --------------------------------------------------------------------------
 
-    def plan(self, eid: str, *, pilot: bool = False) -> dict[str, Any]:
-        """Validate, expand every cell, estimate, and write `plan.json` (status: proposed)."""
-        from hone_select.experiments import selection, subjects  # noqa: PLC0415 - they import this module
+    def plan(self, eid: str, *, pilot: bool = False, sources: Any = None) -> dict[str, Any]:
+        """Validate, expand every cell, estimate, and write `plan.json` (status: proposed). `sources`: where
+        the run-condition reading comes from (default: this machine)."""
+        from hone_select.experiments import conditions, guard, needs, selection, subjects  # noqa: PLC0415
 
         folder, spec, cases = self.load(eid)
         setups = d.setups(spec)
+        src = sources or conditions.DEFAULT
+        needs.check_definition(spec, cases, setups)
         selection.check_criteria(spec, self.root)
         outputs = len(cases) * len(setups) * spec.samples
         plan: dict[str, Any] = {
@@ -113,8 +116,12 @@ class Project:
                 "from": "unknown (run `plan --pilot` to measure)",
             },
         }
+        section = needs.plan_section(spec, cases, setups, src)
+        if section is not None:
+            plan["conditions"] = section
         if pilot:
-            sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
+            with guard.pilot(spec, folder, needs.needed(spec, cases[0], setups[0]), src):
+                sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
             plan["pilot"] = sample
             per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
             plan["estimate"] = {
@@ -182,7 +189,7 @@ class Project:
 
 
 def _run_state(run: dict[str, Any]) -> str:
-    if run.get("state") == "running" and not _alive(run.get("pid")):
+    if run.get("state") in ("running", "waiting") and not _alive(run.get("pid")):
         return "stopped"  # the process died without saying so
     return str(run.get("state"))
 

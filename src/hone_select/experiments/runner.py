@@ -7,14 +7,19 @@ Generation is resumable (a sample with `result.json` is done) and ordered by `ru
 from __future__ import annotations
 
 import os
+from collections import deque
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 from hone_select.errors import HoneSelectError
+from hone_select.experiments import checks, conditions, needs, results, selection, subjects
 from hone_select.experiments import definition as d
-from hone_select.experiments import results, selection, subjects
+from hone_select.experiments.guard import Check, Guard, RunStoppedError, StartRefusedError
 from hone_select.experiments.project import Project, now, read_json, write_json
+
+OUTSIDE = "outside-1.json"  # a sample set aside because it ran outside the run conditions
 
 
 def sample_id(case: str, setup: str, k: int) -> str:
@@ -40,13 +45,51 @@ def cells(
 
 
 def start(
-    project: Project, eid: str, on_sample: Callable[[dict[str, Any]], None] | None = None
+    project: Project,
+    eid: str,
+    on_sample: Callable[[dict[str, Any]], None] | None = None,
+    *,
+    sources: conditions.Sources | None = None,
 ) -> dict[str, Any]:
-    """Run an approved experiment (or resume a stopped one) to the end; returns its status."""
-    state = project.status(eid)
-    if state["status"] == "running":  # a live process: two runs would write the same files
+    """Run an approved experiment (or resume a stopped one) to the end; returns its status. `sources` are
+    where the run-condition readings come from (default: this machine; tests pass fakes)."""
+    _startable(project.status(eid), eid)
+    folder, spec, cases = project.load(eid)
+    plan = read_json(folder / "plan.json")
+    (folder / "STOP").unlink(missing_ok=True)
+    run: dict[str, Any] = {
+        "state": "running",
+        "pid": os.getpid(),
+        "started_at": now(),
+        "definition_hash": plan["definition_hash"],
+        "stopped_because": None,
+    }
+    guard = Guard(spec, folder, run, sources or conditions.DEFAULT)
+    write_json(folder / "run.json", run)
+    try:
+        guard.hold_lock(eid.split("-", 1)[0])
+        finished = _generate(project.root, folder, spec, cases, on_sample=on_sample, guard=guard)
+        if finished:
+            selection.score(project.root, folder, spec, cases, eid.split("-", 1)[0])
+            results.report(folder, spec, plan)
+        run |= {"state": "completed" if finished else "stopped", "ended_at": now()}
+    except (RunStoppedError, StartRefusedError) as e:
+        run |= {"state": "stopped", "ended_at": now(), "stopped_because": e.reasons}
+        if isinstance(e, StartRefusedError):
+            raise
+    except BaseException:
+        run |= {"state": "stopped", "ended_at": now()}
+        raise
+    finally:
+        guard.release()
+        write_json(folder / "run.json", run)
+    return project.status(eid)
+
+
+def _startable(state: dict[str, Any], eid: str) -> None:
+    if state["status"] in ("running", "waiting"):  # a live process: two runs would write the same files
         raise HoneSelectError(
-            f"{eid} is already running (pid {state['run']['pid']}); stop it first: "
+            f"{eid} is already {state['status']} (pid {state['run']['pid']}); stop it first: "
             f"hone-select experiments stop {eid}"
         )
     if state["status"] == "completed":
@@ -59,28 +102,23 @@ def start(
             f"{eid} is {state['status']}: only an approved experiment starts "
             "(plan it, then approve it in the dashboard or with `experiments approve`)"
         )
-    folder, spec, cases = project.load(eid)
-    plan = read_json(folder / "plan.json")
-    (folder / "STOP").unlink(missing_ok=True)
-    run = {
-        "state": "running",
-        "pid": os.getpid(),
-        "started_at": now(),
-        "definition_hash": plan["definition_hash"],
-    }
-    write_json(folder / "run.json", run)
-    try:
-        finished = _generate(project.root, folder, spec, cases, on_sample)
-        if finished:
-            selection.score(project.root, folder, spec, cases, eid.split("-", 1)[0])
-            results.report(folder, spec, plan)
-        run |= {"state": "completed" if finished else "stopped", "ended_at": now()}
-    except BaseException:
-        run |= {"state": "stopped", "ended_at": now()}
-        raise
-    finally:
-        write_json(folder / "run.json", run)
-    return project.status(eid)
+
+
+Cell = tuple[dict[str, Any], dict[str, Any], int, int]  # case, setup, sample, attempt
+
+
+def _target(folder: Path, case: dict[str, Any], setup: dict[str, Any], k: int) -> Path:
+    return folder / "outputs" / case["id"] / d.setup_id(setup) / f"s{k}" / "result.json"
+
+
+def _pending(folder: Path, spec: d.ExperimentSpec, cases: list[dict[str, Any]]) -> deque[Cell]:
+    """The samples not done yet, in run order; a sample set aside once (`outside-1.json`) is attempt 2."""
+    out: deque[Cell] = deque()
+    for case, setup, k in cells(spec, cases):
+        target = _target(folder, case, setup, k)
+        if not target.is_file():
+            out.append((case, setup, k, 2 if target.with_name(OUTSIDE).is_file() else 1))
+    return out
 
 
 def _generate(
@@ -88,42 +126,77 @@ def _generate(
     folder: Path,
     spec: d.ExperimentSpec,
     cases: list[dict[str, Any]],
+    *,
     on_sample: Callable[[dict[str, Any]], None] | None,
+    guard: Guard,
 ) -> bool:
-    """Every missing sample; False when stopped early (STOP file or budget)."""
+    """Every missing sample, each between two checks of the run conditions; False when stopped early
+    (STOP file or budget). Raises `RunStoppedError` when the conditions stop the run."""
     hook = subjects.import_object(spec.generate.after_group) if spec.generate.after_group else None
-    group: Any = None
-    for case, setup, k in cells(spec, cases):
-        sid = d.setup_id(setup)
-        target = folder / "outputs" / case["id"] / sid / f"s{k}" / "result.json"
-        if target.is_file():
-            continue
+    queue = _pending(folder, spec, cases)
+    before: Check | None = None
+    while queue:
+        case, setup, k, attempt = queue.popleft()
         if (folder / "STOP").is_file() or _over_budget(folder, spec):
             return False
-        current = setup.get(spec.run.order or "")
-        if hook is not None and group is not None and current != group:
-            hook(group)
-        group = current
-        seed = spec.seed + k
-        out = subjects.run_sample(
-            spec, case, setup, seed, subjects.Where(root, folder, target.parent / "files")
-        )
+        need = needs.needed(spec, case, setup)
+        if before is None or before.needed != need:
+            before = guard.check(need, prepare=True)
+        before = guard.settle(before, partial(guard.check, need, prepare=True))
+        target, seed = _target(folder, case, setup, k), spec.seed + k
+        where = subjects.Where(root, folder, target.parent / "files")
+        out = subjects.run_sample(spec, case, setup, seed, where)
+        after = _after(guard, hook, spec, nxt=queue[0] if queue else None, setup=setup, need=need)
         result = {
-            "sample_id": sample_id(case["id"], sid, k),
+            "sample_id": sample_id(case["id"], d.setup_id(setup), k),
             "case": case["id"],
             "case_fields": case["fields"],
-            "setup": sid,
+            "setup": d.setup_id(setup),
             "params": setup,
             "sample": k,
             "seed": seed,
             "at": now(),
             **out,
+            "environment": guard.environment(before, after, attempt),
         }
-        write_json(target, result)
-        if on_sample is not None:
+        if not _keep(spec, target, result, attempt):
+            queue.appendleft((case, setup, k, 2))  # set aside: it runs once more
+        elif on_sample is not None:
             on_sample(result)
-    if hook is not None and group is not None:
+        before = after
+    return True
+
+
+def _after(
+    guard: Guard,
+    hook: Any,
+    spec: d.ExperimentSpec,
+    *,
+    nxt: Cell | None,
+    setup: dict[str, Any],
+    need: list[str],
+) -> Check:
+    """The check after a sample, which is also the check before the next one (its `after_group` hook first
+    when the `run.order` factor changes). After the last sample: a reading only."""
+    group = setup.get(spec.run.order or "")
+    if hook is not None and group is not None and (nxt is None or nxt[1].get(spec.run.order or "") != group):
         hook(group)
+    if nxt is None:
+        return guard.check(need, prepare=False)
+    return guard.check(needs.needed(spec, nxt[0], nxt[1]), prepare=True)
+
+
+def _keep(spec: d.ExperimentSpec, target: Path, result: dict[str, Any], attempt: int) -> bool:
+    """Write the sample; a first attempt outside the conditions is set aside as `outside-1.json` instead
+    (it runs again), unless the experiment only records (`record_only`). False when set aside."""
+    env = result["environment"]
+    mode = spec.conditions.on_violation
+    if env["status"] in ("outside", "unknown") and mode != "record_only" and attempt == 1:
+        write_json(target.with_name(OUTSIDE), result)
+        if mode == "stop":
+            raise RunStoppedError(checks.reasons(env["checks"]))
+        return False
+    write_json(target, result)
     return True
 
 

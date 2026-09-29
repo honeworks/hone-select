@@ -70,6 +70,40 @@ class BudgetSpec(_Model):
     seconds: float | None = Field(default=None, gt=0)
 
 
+CHECKS = (
+    "max_cpu_load",
+    "min_free_ram_gb",
+    "min_free_vram_gb",
+    "max_gpu_utilization_pct",
+    "only_needed_models",
+    "models_on_gpu",
+    "gpu_lock",
+)
+
+
+class ConditionsSpec(_Model):
+    """`[conditions]`: the state of the machine the experiment needs (design change 0010 §1). A key that is
+    not set is not checked."""
+
+    max_cpu_load: float | None = Field(default=None, ge=0, le=1)  # share of all cores busy over a window
+    min_free_ram_gb: float | None = Field(default=None, ge=0)  # MemAvailable
+    min_free_vram_gb: float | None = Field(default=None, ge=0)  # GPU 0, not counting the needed models
+    max_gpu_utilization_pct: float | None = Field(default=None, ge=0, le=100)
+    only_needed_models: bool = False  # unload the other models through the probe
+    models_on_gpu: bool = False  # the needed models must be fully in VRAM
+    models: list[str] | None = None  # the needed models (placeholders as in `command`)
+    gpu_lock: bool | str = False  # hold the machine-wide GPU lock for the whole run (true, or a path)
+    if_busy: Literal["block", "unload"] = "block"  # passed to the probe's prepare
+    warm_up: bool = False  # load the missing needed models before a sample (the probe's `load`)
+    on_violation: Literal["wait", "stop", "record_only"] = "wait"
+    wait_timeout: float = Field(default=1800.0, gt=0)  # seconds one wait may last
+    probe: str | None = None  # a `hone.machine_probes` entry point, e.g. "hone_models:machine"
+
+    def declared(self) -> list[str]:
+        """The conditions this experiment checks, in a fixed order."""
+        return [name for name in CHECKS if getattr(self, name) not in (None, False, "")]
+
+
 class HumanScorer(_Model):
     kind: Literal["human"]
     question: str
@@ -94,6 +128,7 @@ class ExperimentSpec(_Model):
     scorers: dict[str, dict[str, Any]] = Field(default_factory=dict[str, dict[str, Any]])
     budget: BudgetSpec = BudgetSpec()
     run: RunSpec = RunSpec()
+    conditions: ConditionsSpec = ConditionsSpec()
 
     def human_scorers(self) -> dict[str, HumanScorer]:
         return {n: HumanScorer.model_validate(s) for n, s in self.scorers.items() if s.get("kind") == "human"}
