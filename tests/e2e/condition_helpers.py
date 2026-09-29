@@ -44,7 +44,7 @@ function = "subjects:write"
 model = ["small", "large"]
 [criteria]
 scorers = ["length"]
-measure = {{ seconds = "lower" }}
+measure = {{ words = "higher" }}
 [conditions]
 {conditions}
 """

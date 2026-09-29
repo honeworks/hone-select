@@ -92,7 +92,9 @@ def would(c: ConditionsSpec, found: dict[str, checks.Check]) -> str:
         return "start"
     if any(v["state"] == checks.UNKNOWN for v in found.values()):
         return "refuse to start (cannot measure): " + "; ".join(checks.reasons(found))
-    return f"{ACTIONS[c.on_violation]}: " + "; ".join(checks.reasons(found))
+    extra = found.get("only_needed_models", {})
+    unload = f" (prepare would unload {', '.join(extra['value'])})" if extra.get("value") else ""
+    return f"{ACTIONS[c.on_violation]}: " + "; ".join(checks.reasons(found)) + unload
 
 
 def plan_section(

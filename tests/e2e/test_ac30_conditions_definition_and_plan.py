@@ -90,7 +90,7 @@ def test_ac30_the_plan_shows_the_conditions_and_unloads_nothing(tmp_path: Path) 
     assert checks["only_needed_models"]["value"] == ["llama3.1:8b"]
     assert checks["gpu_lock"]["state"] == "ok"  # free: the run will hold it
     assert plan["now"]["would"].startswith("wait: min_free_ram_gb")
-    assert "prepare would unload it" in plan["now"]["would"]
+    assert plan["now"]["would"].endswith("(prepare would unload llama3.1:8b)")
     assert all(c["call"] != "prepare" for c in probe.calls)  # plan unloads nothing
     assert probe.loaded == [LEFTOVER]
     assert p.status("E0001")["status"] == "approved"

@@ -55,6 +55,7 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
                     "cost_usd": r.get("cost_usd"),
                     "human": human.get(r["sample_id"], {}),
                     "environment_status": environment_status(r),
+                    "environment": r.get("environment"),
                     "cold": is_cold(r),
                     "off_conditions": off_conditions(r.get("environment")),
                 }

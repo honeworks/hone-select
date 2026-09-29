@@ -132,7 +132,7 @@ def only_needed(r: Mapping[str, Any], needed: Sequence[str], prepared: Mapping[s
         return bad
     extra = [str(m.get("name")) for m in cast(Models, r["loaded_models"]) if m.get("model_id") not in needed]
     if extra:
-        verb = "is loaded (prepare would unload it)" if prepared is None else "is still loaded"
+        verb = "is loaded" if prepared is None else "is still loaded"
         return _bad(OUTSIDE, f"{name}: {', '.join(extra)} {verb}", extra)
     return _ok([])
 

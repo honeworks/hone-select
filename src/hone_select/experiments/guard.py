@@ -178,7 +178,7 @@ class Guard:
         result, why = first if first is not None else attempt()
         if not why:
             return result
-        since = self.src.clock()
+        since, began = self.src.clock(), why
         until, outcome = since + self.c.wait_timeout, "timed out"
         self.run |= {
             "state": "waiting",
@@ -200,7 +200,12 @@ class Guard:
                 self.run["waiting"]["reasons"] = why
                 write_json(self.folder / "run.json", self.run)
         finally:
-            wait = {"since": _iso(since), "ended": _iso(self.src.clock()), "outcome": outcome, "reasons": why}
+            wait = {
+                "since": _iso(since),
+                "ended": _iso(self.src.clock()),
+                "outcome": outcome,
+                "reasons": began,
+            }
             self.run["waits"] = [*self.run.get("waits", []), wait]
             self.run["state"] = "running"
             self.run.pop("waiting", None)
