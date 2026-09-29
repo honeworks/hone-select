@@ -219,6 +219,7 @@ def test_ac24_secrets_never_recorded_and_prompt_text_is_content(
         ('password = "planted-a"', ["password"], None),
         ('client_secret = "planted-a"', ["client_secret"], None),
         ('Authorization = "planted-a"', ["Authorization"], None),
+        ('sort_key = "planted-a"', ["sort_key"], None),  # over-redacting on purpose (docs/records.md)
         (
             'headers = [{ name = "x-app", token = "planted-a" }]',
             ["headers", 0, "token"],
