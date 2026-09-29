@@ -253,7 +253,16 @@ def test_ac27_a_money_budget_counts_known_costs_only(tmp_path: Path, pricing: st
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [(0.5, 0.5), (0, 0.0), (True, None), (float("nan"), None), (-1, None), ("0.5", None), (None, None)],
+    [
+        (0.5, 0.5),
+        (0, 0.0),
+        (True, None),
+        (float("nan"), None),
+        (float("inf"), None),
+        (-1, None),
+        ("0.5", None),
+        (None, None),
+    ],
 )
 def test_ac27_what_counts_as_a_cost(value: object, expected: float | None) -> None:
     from hone_select.experiments.process import cost

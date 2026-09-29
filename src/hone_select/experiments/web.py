@@ -137,7 +137,10 @@ def same_origin(headers: Any, allowed: set[str] | None) -> bool:
     origin = headers.get("Origin")
     if origin is None:
         return True
-    parts = urlsplit(str(origin))
+    try:
+        parts = urlsplit(str(origin))
+    except ValueError:  # a malformed Origin is refused, not a crash
+        return False
     return parts.scheme in ("http", "https") and parts.netloc == headers.get("Host", "")
 
 

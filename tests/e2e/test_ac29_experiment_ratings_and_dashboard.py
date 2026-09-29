@@ -200,6 +200,8 @@ def test_ac29_write_origin_rules(served: tuple[str, Path]) -> None:
     )  # wrong port
     assert call(approve, body, {"Content-Type": "application/json"})[0] == 403  # no page header
     assert call(approve, body, {**PAGE, "Origin": f"127.0.0.1:{port}"})[0] == 403  # not a valid Origin
+    assert call(approve, body, {**PAGE, "Origin": "http://["})[0] == 403  # malformed: refused, not a crash
+    assert call(base + "/api/experiments/E0002")[1]["status"] == "proposed"  # nothing above approved it
     status, answer = call(approve, body, {**PAGE, "Origin": f"https://127.0.0.1:{port}"})
     assert (status, answer["decision"]) == (200, "approved")
 

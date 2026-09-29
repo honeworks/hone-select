@@ -121,7 +121,7 @@ def files(workdir: Path) -> dict[str, dict[str, Any]]:
 
 def cost(value: Any) -> float | None:
     """A cost in USD when the subject reported a real one; None (unknown), never 0, otherwise. A boolean,
-    NaN or a negative number is not a cost."""
-    if isinstance(value, bool) or not isinstance(value, int | float) or math.isnan(value) or value < 0:
+    NaN, an infinity or a negative number is not a cost."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value < 0:
         return None
     return float(value)
