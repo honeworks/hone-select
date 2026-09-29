@@ -57,3 +57,6 @@ runs/
 .DS_Store
 
 *.log
+
+# Claude Code: machine-specific settings
+.claude/settings.local.json
