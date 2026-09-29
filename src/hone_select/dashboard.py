@@ -17,7 +17,7 @@ from typing import Any, cast
 from hone_select._records import read_spans
 from hone_select.errors import HoneSelectError
 
-__all__ = ["all_candidates", "list_runs", "run_detail", "serve"]
+__all__ = ["all_candidates", "list_runs", "make_server", "run_detail", "serve"]
 
 RUN = "hone.select.run"
 CONTEXT_KEYS = ("hone.run_id", "hone.item", "hone.step")
@@ -68,6 +68,15 @@ def _row(cid: str, **known: Any) -> dict[str, Any]:
     return {"id": cid, **empty, **known, "params": {}, "meta": {}, "gates": {}, "scores": {}}
 
 
+def _generated(spans: Spans) -> set[str]:
+    """Ids of the candidates generated (failed generations have no candidate id)."""
+    return {
+        s["attributes"]["hone.candidate_id"]
+        for s in spans
+        if s["name"] == "hone.select.generate" and "hone.candidate_id" in s["attributes"]
+    }
+
+
 def _summary(run_id: str, spans: Spans) -> dict[str, Any]:
     root = next(s for s in spans if s["span_id"] == run_id)
     attrs = root["attributes"]
@@ -83,7 +92,7 @@ def _summary(run_id: str, spans: Spans) -> dict[str, Any]:
         "status": root["status"]["code"],
         "policy": attrs.get("hone.select.policy"),
         "n": attrs.get("hone.select.n"),
-        "candidate_count": max(len(ranked), sum(s["name"] == "hone.select.generate" for s in spans)),
+        "candidate_count": max(len(ranked), len(_generated(spans))),
         "rejected": sum(bool(r["rejected"]) for r in ranked),
         "winner": winner,
         "winner_total": total,

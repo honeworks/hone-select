@@ -168,3 +168,122 @@ def test_ac24_a_busy_port_is_a_clear_error(server: str, hone_home: Path) -> None
     port = int(server.rsplit(":", 1)[1])
     with pytest.raises(HoneSelectError, match="cannot listen on 127.0.0.1"):
         make_server(store(hone_home), port=port)
+
+
+SECRET_CONFIG = """
+[judges.remote]
+client = "never.loaded:factory"
+api_key = "planted-api-key-value"
+auth_token = "planted-token-value"
+[generate]
+n = 2
+[scorers.clear]
+kind = "prompt"
+judge = "local"
+criteria = "PLANTED-CRITERIA the chorus is clear"
+[score]
+cascade = [{ scorers = ["clear"] }]
+"""  # noqa: S105 - planted fake secrets that the tests prove are never recorded
+
+
+@pytest.mark.parametrize("capture", ["1", "0"])
+def test_ac24_secrets_never_recorded_and_prompt_text_is_content(
+    capture: str, hone_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hone_select.testing import FakeDecisionClient
+
+    monkeypatch.setenv("HONE_CAPTURE_CONTENT", capture)
+    engine = Engine(SECRET_CONFIG, registry=[write], judges={"local": FakeDecisionClient()})
+    run_id = engine.run("a song").run_id
+    raw = store(hone_home).read_bytes() + b"".join(
+        p.read_bytes() for p in store(hone_home).parent.glob("*-wal")
+    )
+    assert b"planted-api-key-value" not in raw
+    assert b"planted-token-value" not in raw
+    config = run_detail(store(hone_home), run_id)["config"]
+    assert config["judges"]["remote"]["api_key"] == "***"
+    assert config["judges"]["remote"]["auth_token"] == "***"  # noqa: S105 - the redaction marker
+    assert config["generate"]["n"] == 2  # structure stays readable
+    criteria = config["scorers"]["clear"]["criteria"]
+    if capture == "1":
+        assert criteria.startswith("PLANTED-CRITERIA")
+    else:
+        assert set(criteria) == {"sha256", "len"}
+        assert b"PLANTED-CRITERIA" not in raw
+
+
+def test_ac24_secrets_are_not_served(hone_home: Path) -> None:
+    from hone_select.testing import FakeDecisionClient
+
+    Engine(SECRET_CONFIG, registry=[write], judges={"local": FakeDecisionClient()}).run("a song")
+    srv = make_server(store(hone_home), port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}"
+        run_id = json.loads(fetch(base + "/api/runs")[2])[0]["run_id"]
+        bodies = b"".join(fetch(base + p)[2] for p in ("/api/runs", f"/api/runs/{run_id}", "/api/candidates"))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert b"planted-api-key-value" not in bodies
+    assert b"planted-token-value" not in bodies
+
+
+@generator()
+def mixed(task, v):
+    return ["", "same", "same", "fine answer"][v["index"]]  # empty (gated), a duplicate, a normal one
+
+
+@gate()
+def not_blank(c):
+    return bool(c.data)
+
+
+@scorer()
+def picky(c):
+    if c.data == "same":
+        raise ValueError("cannot judge 'same'")
+    return 0.8
+
+
+def test_ac24_failures_show_as_they_happened(hone_home: Path) -> None:
+    cfg = '[generate]\nn = 4\n[score]\ngates = ["not_blank"]\ncascade = [{ scorers = ["picky"] }]\n'
+    run_id = Engine(cfg, registry=[mixed, not_blank, picky]).run("t").run_id
+    d = run_detail(store(hone_home), run_id)
+    by_data = {c["preview"]: c for c in d["candidates"]}
+    assert len(d["candidates"]) == 3  # the duplicate "same" is one candidate
+    assert any(e["event"] == "dedup" for e in d["decision_trace"])
+    blank = by_data[""]
+    assert blank["gates"]["not_blank"]["passed"] is False
+    assert blank["rejected"] is True
+    same = by_data["same"]
+    assert same["scores"]["picky"]["value"] is None  # a failed score is None, never 0
+    assert "cannot judge" in same["scores"]["picky"]["error"]
+    assert same["total"] is None
+    assert by_data["fine answer"]["winner"] is True
+
+
+@generator()
+def broken(task, v):
+    raise RuntimeError("the model is down")
+
+
+def test_ac24_a_run_without_candidates(hone_home: Path) -> None:
+    run_id = Engine("[generate]\nn = 2\n", registry=[broken]).run("t").run_id
+    summary = next(r for r in list_runs(store(hone_home)) if r["run_id"] == run_id)
+    assert summary["winner"] is None
+    assert summary["candidate_count"] == 0
+    d = run_detail(store(hone_home), run_id)
+    assert d["candidates"] == []
+    assert any(e["event"] == "generate_error" for e in d["decision_trace"])
+
+
+def test_ac24_query_strings_and_error_bodies(server: str, two_runs: list[str]) -> None:
+    status, _, body = fetch(server + "/api/runs?refresh=1")
+    assert status == 200
+    assert len(json.loads(body)) == 2
+    status, kind, body = fetch(server + "/api/runs/nope")
+    assert status == 404
+    assert kind == "application/json"
+    assert "no run 'nope'" in json.loads(body)["error"]
+    assert json.loads(fetch(server + "/nothing")[2]) == {"error": "not found"}

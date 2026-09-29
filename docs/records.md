@@ -16,7 +16,8 @@ one row per span, in SQLite WAL mode so several processes can write at once.
 | `hone.select.decision` | `hone.select.ranked`, `hone.select.decision_trace`, `hone.select.winner_id`, `hone.select.escalated`, `hone.select.fallback_used` |
 
 Values over 64 KiB go to a `blobs` table by sha256. Anything that looks like an API key or bearer token is
-replaced with `***`. With `[record] capture_content = false` (or `HONE_CAPTURE_CONTENT=0`), candidate text,
+replaced with `***`, and so is every configuration value whose key is named like a key, token, secret,
+password, authorization or credential (for example `api_key` in a `[judges.*]` section). With `[record] capture_content = false` (or `HONE_CAPTURE_CONTENT=0`), candidate text,
 reasons and error messages are stored as hashes only.
 
 Other sinks: `sink = "jsonl"` (one JSON span per line) or `"none"`; or pass any `RecordSink`

@@ -43,8 +43,9 @@ following one candidate's scores means writing SQL.
 - The page is one static HTML file with plain JavaScript, shipped in the package; the server is
   `http.server` answering `GET /`, `/api/runs` and `/api/runs/<run id>` with JSON built from the store. It
   is **read-only**, listens on localhost by default and never writes to the store.
-- **Records:** the `hone.select.run` span gains `hone.select.config` (the validated configuration as JSON)
-  and `hone.select.task` (a preview of the task, first 2,000 characters; hashed like other content when
+- **Records:** the `hone.select.run` span gains `hone.select.config` (the validated configuration as JSON;
+  values of keys named like a key, token, secret, password, authorization or credential are replaced with
+  `***`, and prompt text (`criteria`, `anchors`) is content, hashed when capture is off) and `hone.select.task` (a preview of the task, first 2,000 characters; hashed like other content when
   content capture is off). Older runs show "not recorded".
 - The data layer is public for other tools: `hone_select.dashboard.list_runs(db)`,
   `run_detail(db, run_id)` and `all_candidates(db)` return plain JSON-ready values.

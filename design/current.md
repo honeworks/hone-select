@@ -550,7 +550,9 @@ for incremental readers). It uses WAL mode with a busy timeout, so several proce
 once. `[record] sink = "jsonl"` writes one span per line instead (large values stay inline), and
 `"none"` records nothing.
 
-Secrets are never recorded: values that look like API keys are scrubbed. Content capture (candidate data,
+Secrets are never recorded: values that look like API keys are scrubbed, and in the recorded configuration
+(`hone.select.config`) the values of keys named like a key, token, secret, password, authorization or
+credential are replaced with `***`. Content capture (candidate data,
 reasons, the decision trace) is on by default; `capture_content = false` or `HONE_CAPTURE_CONTENT=0`
 stores hashes and lengths instead.
 

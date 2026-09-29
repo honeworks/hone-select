@@ -19,6 +19,7 @@ from hone_select import (
     pairwise,
     scorer,
 )
+from hone_select._records import read_spans
 from hone_select.testing import FakeDecisionClient
 
 pytestmark = pytest.mark.e2e
@@ -98,6 +99,8 @@ def test_ac13_spans_in_default_store(hone_home: Path) -> None:
     assert all(s["parent_span_id"] == root["span_id"] for s in spans if s is not root)
     for key in (
         "hone.select.config_hash",
+        "hone.select.config",
+        "hone.select.task",
         "hone.select.policy",
         "hone.select.n",
         "hone.select.budget.cost_used",
@@ -245,3 +248,14 @@ def test_ac13_unwritable_store_is_a_config_error(tmp_path: Path) -> None:
     blocker.write_text("not a folder")
     with pytest.raises(ConfigError, match="cannot open the span store"):
         Engine(f'[record]\npath = "{blocker}/spans.db"')
+
+
+def test_ac13_task_preview_is_cut_and_select_records_no_task(tmp_path: Path) -> None:
+    db = tmp_path / "spans.db"
+    engine = Engine(f'[record]\npath = "{db}"\n[generate]\nn = 1\n', registry=[write])
+    engine.run("x" * 5000)
+    root = next(s for s in read_spans(db) if s["name"] == "hone.select.run")["attributes"]
+    assert root["hone.select.task"] == "x" * 2000
+    engine.select([Candidate.of({"lyrics": "given"})])
+    roots = [s["attributes"] for s in read_spans(db) if s["name"] == "hone.select.run"]
+    assert "hone.select.task" not in roots[-1]

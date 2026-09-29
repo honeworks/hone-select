@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from hone_select._records import default_sink
 from hone_select._tracing import span
@@ -27,6 +28,26 @@ from hone_select.types import Candidate, Result, Scored, Variation, as_text, can
 from hone_select.variation import variations
 
 TASK_PREVIEW = 2000  # characters of the task kept on the run span (design change 0008)
+# configuration keys whose values are never recorded, and prompt text recorded as content (design change 0008)
+SECRET_KEY = re.compile(
+    r"(^|_)(api_?key|key|access_?token|token|secret|password|passwd|authorization|credentials?)(_|$)",
+    re.IGNORECASE,
+)
+CONTENT_KEYS = ("criteria", "anchors")
+
+
+def recorded_config(value: Any, run: Run, key: str = "") -> Any:
+    """The configuration as recorded: values of secret-named keys become ``***``; prompt text goes through
+    ``run.content`` (hashed when content capture is off)."""
+    if SECRET_KEY.search(key):
+        return "***"
+    if key in CONTENT_KEYS:
+        return run.content(value)
+    if isinstance(value, dict):
+        return {str(k): recorded_config(v, run, str(k)) for k, v in cast(dict[Any, Any], value).items()}
+    if isinstance(value, list):
+        return [recorded_config(v, run) for v in cast(list[Any], value)]
+    return value
 
 
 class Engine:
@@ -103,7 +124,7 @@ class Engine:
         config_json = canonical_json(config)
         attributes: dict[str, Any] = {
             "hone.select.config_hash": hashlib.sha256(config_json.encode()).hexdigest()[:16],
-            "hone.select.config": config,  # what was tested (design change 0008)
+            "hone.select.config": recorded_config(config, run),  # what was tested (design change 0008)
             "hone.select.policy": self.config.select.policy,
             "hone.select.n": self.config.generate.n,
         }
