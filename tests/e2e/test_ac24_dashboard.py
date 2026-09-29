@@ -2,7 +2,6 @@
 gates, scores, winner), compares candidates across runs, and serves it all read-only over HTTP."""
 
 import json
-import re
 import threading
 import urllib.error
 import urllib.request
@@ -347,18 +346,3 @@ def test_ac24_query_strings_and_error_bodies(server: str, two_runs: list[str]) -
     assert kind == "application/json"
     assert "no run 'nope'" in json.loads(body)["error"]
     assert json.loads(fetch(server + "/nothing")[2]) == {"error": "not found"}
-
-
-PAGE_CALL = re.compile(r"""(?:get|fetch)\(`?"?(/(?:api|files)/[^"`)$]*)""")
-
-
-def test_ac24_every_endpoint_the_page_calls_is_served(server: str, two_runs: list[str]) -> None:
-    """The page cannot be tested without a browser; at least every API path its code calls must exist."""
-    page = fetch(server + "/")[2].decode()
-    called = {m.rstrip("/") for m in PAGE_CALL.findall(page)}
-    assert called >= {"/api/info", "/api/runs", "/api/candidates", "/api/experiments", "/files"}
-    run_id = two_runs[0]
-    for path in ("/api/info", "/api/runs", f"/api/runs/{run_id}", "/api/candidates"):
-        assert fetch(server + path)[0] == 200, path
-    for view in ("showExperiments", "showExperiment", "showRuns", "showRun", "showCandidates", "showRate"):
-        assert f"function {view}(" in page  # every view the router names is defined

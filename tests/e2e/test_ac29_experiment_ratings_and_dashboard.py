@@ -3,6 +3,7 @@ the dashboard lists experiments, shows one, approves or denies it, takes ratings
 and refuses writes that do not come from its own page and paths outside the experiment."""
 
 import json
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -220,3 +221,42 @@ def test_ac29_a_network_bind_answers_other_hosts(tmp_path: Path) -> None:
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+PAGE_CALL = re.compile(r"""(?:get|fetch)\(`?"?(/(?:api|files)/[^"`)]*)""")
+PLACEHOLDER = re.compile(r"\$\{[^}]*\}")
+
+
+def test_ac29_every_path_the_page_calls_is_served(tmp_path: Path) -> None:
+    """No DOM tooling here: fetch every API path the page's code calls, with real ids filled in."""
+    p, _ = approved(tmp_path, HUMAN)
+    start(p, "E0001")
+    srv = make_server(tmp_path / ".hone" / "select" / "spans.db", port=0, project=tmp_path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    try:
+        page = urllib.request.urlopen(base + "/", timeout=10).read().decode()  # noqa: S310 - a local test server
+        called = sorted(set(PAGE_CALL.findall(page)))
+        run_id = call(base + "/api/runs")[1][0]["run_id"]
+        sample = call(base + "/api/experiments/E0001")[1]["samples"][0]["sample_id"]
+        case, setup, k = sample.split("__")
+        values = {"eid": "E0001", "criterion": "keep_reading", "id": run_id}
+        checked = []
+        for template in called:
+            if template.startswith("/files/"):
+                url = f"/files/E0001/outputs/{case}/{setup}/{k}/result.json"  # what the samples panel fetches
+            else:
+                names = [
+                    m.strip("${}").split(".")[-1].split("(")[-1].rstrip(")")
+                    for m in PLACEHOLDER.findall(template)
+                ]
+                url = template
+                for name in names:
+                    url = PLACEHOLDER.sub(values[name], url, count=1)
+            status, _ = call(base + url, raw=True)
+            assert status == 200, (template, url)
+            checked.append(template)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert len(checked) >= 7  # info, runs, a run, candidates, experiments, an experiment, rating, files
