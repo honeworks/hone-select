@@ -147,3 +147,12 @@ reads and writes. Bound to another address (`--host 0.0.0.0`, a machine name), i
 addresses and names it cannot list, so any `Host` is answered; writes still need the page's
 `X-Hone-Dashboard` header and, when present, an `http(s)` `Origin` on the same address as the `Host`.
 Binding to another address is the user's explicit choice to expose the page on the network.
+
+## D-012: the dashboard's layout  (2026-09-29)
+
+The dashboard is one static page (no build step, no dependencies): a sidebar with Experiments (the start
+page), Runs and Candidates; light and dark themes from the system setting; tables with a search box,
+optional per-column filters and sortable headers; details in a side panel. An experiment opens on the
+answer (the best setup and a chart per setting) and the next step, with the decision on top while a plan
+is proposed. `GET /api/info` returns the store and project paths and the version for the sidebar.
+Reason: the owner asked for a simple, modern and useful page; the answer and the next action come first.

@@ -1,7 +1,7 @@
 """A local dashboard over a span store and a project's experiments (design changes 0008, 0009).
 
 ``list_runs``, ``run_detail`` and ``all_candidates`` turn the spans of a store into plain JSON-ready values;
-``make_server`` / ``serve`` answer ``GET /`` (the page), ``/api/runs``, ``/api/runs/<run id>``,
+``make_server`` / ``serve`` answer ``GET /`` (the page), ``/api/info``, ``/api/runs``, ``/api/runs/<run id>``,
 ``/api/candidates`` and the experiment endpoints of ``hone_select.experiments.web``. The store is only read.
 """
 
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from hone_select._dashboard_data import all_candidates, list_runs, run_detail
+from hone_select._version import __version__
 from hone_select.errors import HoneSelectError
 from hone_select.experiments import web
 from hone_select.experiments.project import Project
@@ -35,6 +36,14 @@ def _routes(db: Path, project: Path | None) -> Callable[[str], tuple[int, str, b
             return 200, "text/html; charset=utf-8", _page()
         if project is not None and (path.startswith(("/api/experiments", "/files/"))):
             return web.get(Project(project), path)
+        if path == "/api/info":
+            info = {
+                "store": str(db),
+                "store_exists": db.exists(),
+                "project": str(project) if project else None,
+                "version": __version__,
+            }
+            return 200, "application/json", json.dumps(info).encode()
         try:
             if path == "/api/runs":
                 data: Any = list_runs(db) if db.exists() else []

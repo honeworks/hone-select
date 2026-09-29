@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from hone_select import Candidate, Engine, HoneSelectError, gate, generator, scorer
+from hone_select import Candidate, Engine, HoneSelectError, __version__, gate, generator, scorer
 from hone_select.cli import app
 from hone_select.dashboard import all_candidates, list_runs, make_server, run_detail
 
@@ -140,7 +140,7 @@ def fetch(url: str) -> tuple[int, str, bytes]:
         return e.code, e.headers["Content-Type"], e.read()
 
 
-def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str]) -> None:
+def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str], hone_home: Path) -> None:
     status, kind, body = fetch(server + "/")
     assert status == 200
     assert kind.startswith("text/html")
@@ -151,6 +151,15 @@ def test_ac24_server_serves_the_page_and_the_api(server: str, two_runs: list[str
     assert json.loads(body)["task"] == "a song"
     assert len(json.loads(fetch(server + "/api/candidates")[2])) == 8
     assert fetch(server + "/api/runs/nope")[0] == 404
+    status, _, body = fetch(server + "/api/info")
+    info = json.loads(body)
+    assert status == 200
+    assert info == {
+        "store": str(store(hone_home)),
+        "store_exists": True,
+        "project": None,
+        "version": __version__,
+    }
     assert fetch(server + "/nothing")[0] == 404
 
 
