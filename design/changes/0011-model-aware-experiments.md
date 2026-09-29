@@ -146,7 +146,11 @@ scene = "a girl on a rooftop at night. Camera: low angle, looking up at her agai
 
 - `plan.json` gains `models`: per model in the experiment, its guide from hone-models (summary, prompt
   advice, accepted inputs, features with examples and source, limits, license, `commercial_use`), and
-  per setup the resolved prompt file and inputs after overrides. The dashboard's Plan and Definition tabs
+  per setup the resolved prompt file and inputs after overrides, and whether the model is installed
+  (hone-models 0015's catalog). An experiment may name models that are not installed yet: the plan says
+  which, with the `hone-models models install <id>` command for each, and `start` refuses until they
+  are installed (or the person removes them from the factors), so a missing model never shows up as a
+  column of failures. The dashboard's Plan and Definition tabs
   show them next to the setups, so the person approving can see how each model is asked and why some
   cells are not applicable.
 - The prompt subject gets `{model_guide}` (the guide as text) as a placeholder, so an experiment can
@@ -168,7 +172,8 @@ class ModelGuides(Protocol):
     def guide(self, model_id: str) -> Mapping[str, Any] | None: ...
     # hone-models' ModelGuide as JSON: {"id", "kind", "summary", "prompt", "inputs", "features",
     #  "source", "checked", "license", "commercial_use", "sizes", "durations_s", "max_duration_s",
-    #  "max_references"}; None for a model the source does not know
+    #  "max_references", "installed": "yes" | "no" | "unknown", "install": "<command to run>"};
+    #  None for a model the source does not know
 ```
 
 - `[generate] guides = "hone_models:guides"` names it; it is the default when `client` is a `hone_models:*`
@@ -187,7 +192,7 @@ class ModelGuides(Protocol):
 | AC-36 | A generate subject with a fake music client (the `hone_models.testing` fakes through the entry point): two models, a prompt factor, inputs from the case and the setup, a case file input; one fake result with `error_kind = "out_of_memory"` and another with `refused` | each sample calls `generate` with the sample's seed, `out` in the workdir and the filled inputs (the file as a `Path`); the candidate has the files and measurements; `refused` is a failed sample with its kind; `out_of_memory` with conditions is `outside` and run again once; one session per model group |
 | AC-37 | Per-model overrides: `[generate.per_model]`, a case's `per_model`, `prompts/<model>/guided.md` next to `prompts/guided.md` | each model receives its own prompt and inputs, others the shared ones; `plan.json` shows the resolved prompt and inputs per setup and marks setups "asked differently"; judges never see an override; an override that names no factor or case field is a `ConfigError` at plan time |
 | AC-38 | Needs: a case needing "camera angle", one needing `duration_s >= 60`, a factor value over a model's `max_duration_s`, a model with an undeclared limit | cells whose model lacks the feature or the limit are not applicable, listed with the unmet need, not run, not failures; the undeclared limit is run and marked `need_unknown`; per-setup numbers are over applicable cases with the count; baseline deltas and wins use only cases both sides can do and say how many |
-| AC-39 | Guides: `FakeModelGuides` in the plan and the dashboard, `{model_guide}` in a prompt subject, `ctx.model_guide` in a python subject; no `hone-select[models]` | `plan.json` stores each model's guide and the dashboard shows it; the placeholder and `ctx` get the stored guide; license and `commercial_use` appear in the results and a non-commercial model is marked, not removed; without the extra, a declared `guides` is a `ConfigError` naming it and needs are `need_unknown`; `FakeModelGuides` passes `check_model_guides` |
+| AC-39 | Guides: `FakeModelGuides` in the plan and the dashboard, `{model_guide}` in a prompt subject, `ctx.model_guide` in a python subject; no `hone-select[models]` | `plan.json` stores each model's guide and the dashboard shows it; the placeholder and `ctx` get the stored guide; license and `commercial_use` appear in the results and a non-commercial model is marked, not removed; a model the guide reports as not installed is listed in the plan with its install command and `start` refuses until it is installed; without the extra, a declared `guides` is a `ConfigError` naming it and needs are `need_unknown`; `FakeModelGuides` passes `check_model_guides` |
 
 ### 7. Tests
 
