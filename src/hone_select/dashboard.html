@@ -91,6 +91,8 @@
   tbody tr.click { cursor: pointer; }
   tbody tr.click:hover td { background: var(--surface-2); }
   tbody tr.win td { background: var(--accent-soft); }
+  tbody tr.off td { opacity: .5; }
+  .sub-h { margin: 12px 0 6px; font-weight: 600; font-size: 13px; }
   td .trunc { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
   .empty { padding: 36px; text-align: center; color: var(--muted); }
   .scorebar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
@@ -198,7 +200,8 @@ function copy(text) { navigator.clipboard?.writeText(text).then(() => toast("Cop
 const cmd = text => `<span class="cmd"><code title="${esc(text)}">${esc(text)}</code><button class="btn small" data-copy="${esc(text)}">Copy</button></span>`;
 document.addEventListener("click", e => { const b = e.target.closest("[data-copy]"); if (b) { e.stopPropagation(); copy(b.dataset.copy); } });
 
-const STATUS = {completed: "ok", approved: "info", running: "accent", proposed: "warn", denied: "bad", stopped: "bad", draft: "", ok: "ok", error: "bad", unset: ""};
+const STATUS = {completed: "ok", approved: "info", running: "accent", waiting: "warn", proposed: "warn", denied: "bad", stopped: "bad", draft: "", ok: "ok", error: "bad", unset: "",
+  outside: "warn", unknown: "warn", not_checked: ""};
 const pill = s => `<span class="pill ${STATUS[s] ?? ""}">${esc(s)}</span>`;
 const chips = obj => Object.entries(obj || {}).map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(flat(v))}</b></span>`).join("");
 const ctxChips = r => Object.entries(r.context || {}).map(([k, v]) => `<span class="chip">${esc(k.replace("hone.", ""))} <b>${esc(v)}</b></span>`).join("");
@@ -392,8 +395,11 @@ async function showExperiments() {
   main.querySelectorAll("[data-eid]").forEach(c => c.onclick = () => { location.hash = `#/experiment/${c.dataset.eid}`; });
 }
 function expCard(x) {
+  const why = x.run?.stopped_because?.[0];
   const next = {draft: "Needs a plan", proposed: `<b style="color:var(--warn)">Waiting for your decision</b>`, approved: "Ready to start",
-    running: "Running…", stopped: "Stopped — start resumes", denied: `Denied${x.review?.note ? `: ${esc(x.review.note)}` : ""}`, completed: "Results ready"}[x.status] || "";
+    running: "Running…", waiting: `<b style="color:var(--warn)" title="${esc(waitNote(x))}">Waiting: ${esc(x.run?.waiting?.reasons?.[0] ?? "run conditions")}</b>`,
+    stopped: why ? `<span title="${esc(why)}">Stopped by the run conditions</span>` : "Stopped — start resumes",
+    denied: `Denied${x.review?.note ? `: ${esc(x.review.note)}` : ""}`, completed: "Results ready"}[x.status] || "";
   return `<div class="card exp-card" data-eid="${esc(x.eid)}" tabindex="0"><div class="row"><span class="muted mono">${esc(x.eid)}</span>${pill(x.status)}</div>
     <div style="font-weight:650;font-size:15px">${esc(x.title)}</div><div class="q">${esc(x.question) || "<i>No question written yet.</i>"}</div>
     ${progress(x.done, x.outputs)}<div class="row muted" style="font-size:12.5px"><span>${fmt(x.done)} / ${fmt(x.outputs ?? "?")} outputs</span><span>${next}</span></div></div>`;
@@ -404,19 +410,75 @@ function decisionCard(x) {
   return `<div class="card callout warn"><div style="flex:1;min-width:280px">
       <b>This plan needs your decision.</b><div class="muted" style="margin-top:4px">It produces <b>${fmt(p.outputs)}</b> outputs (${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples} ${p.samples === 1 ? "sample" : "samples"})
       and ${fmt(p.judge_calls)} judge calls. Estimate: ${e.seconds === null ? "time unknown" : duration(e.seconds)}, ${e.money_usd === null ? "cost unknown" : "$" + fmt(e.money_usd)}.
-      See exactly what runs in the <a href="#/experiment/${esc(x.eid)}/plan">Plan</a> tab.</div>
+      See exactly what runs in the <a href="#/experiment/${esc(x.eid)}/plan">Plan</a> tab.${p.conditions ? ` Run conditions now: <b>${esc(p.conditions.now.would)}</b>.` : ""}${p.applicability?.not_applicable?.length ? ` <b>${p.applicability.not_applicable.length}</b> cells are not applicable (a model cannot do the case).` : ""}${Object.values(p.models || {}).some(m => m.installed === "no") ? ` <b style="color:var(--bad)">Some models are not installed.</b>` : ""}</div>
       <textarea id="note" rows="2" style="width:100%;margin-top:10px" placeholder="Note (required to deny)" aria-label="Note"></textarea></div>
     <div style="display:flex;gap:8px"><button class="btn primary" id="approve">Approve</button><button class="btn danger" id="deny">Deny</button></div></div>`;
 }
 function nextStep(x) {
   if (x.status === "proposed" && x.plan) return decisionCard(x);
   if (x.changed_since_plan) return `<div class="card callout bad"><div><b>The definition changed since the plan.</b> <span class="muted">Plan it again; the new plan needs a new decision.</span></div>${cmd(`hone-select experiments plan ${x.eid}`)}</div>`;
+  if (x.status === "waiting") return `<div class="card callout warn"><div style="flex:1;min-width:240px"><b>Waiting for the run conditions</b> <span class="muted">— ${esc(waitNote(x))}. This page refreshes itself.</span>
+    <ul>${(x.run.waiting?.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>${cmd(`hone-select experiments stop ${x.eid}`)}</div>`;
+  if (x.status === "stopped" && x.run?.stopped_because) return `<div class="card callout bad"><div style="flex:1;min-width:240px"><b>Stopped by the run conditions.</b> <span class="muted">Starting again resumes where it stopped.</span>
+    <ul>${x.run.stopped_because.map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>${cmd(`hone-select experiments start ${x.eid}`)}</div>`;
   if (x.status === "running") return `<div class="card callout"><div style="flex:1;min-width:240px"><b>Running</b> <span class="muted">— ${fmt(x.done)} of ${fmt(x.outputs)} outputs. This page refreshes itself.</span><div style="margin-top:8px">${progress(x.done, x.outputs)}</div></div>${cmd(`hone-select experiments stop ${x.eid}`)}</div>`;
   const steps = {draft: ["Plan it to see what will run and what it costs.", `hone-select experiments plan ${x.eid}`],
     approved: [`Approved by ${x.review?.by ?? "?"}. Start it when you are ready.`, `hone-select experiments start ${x.eid}`],
     stopped: ["Stopped before the end. Starting again resumes where it stopped.", `hone-select experiments start ${x.eid}`],
     denied: [`Denied by ${x.review?.by ?? "?"}${x.review?.note ? `: ${x.review.note}` : ""}. Edit the definition, then plan it again.`, `hone-select experiments plan ${x.eid}`]}[x.status];
   return steps ? `<div class="card callout ${x.status === "denied" ? "bad" : ""}"><div class="muted">${esc(steps[0])}</div>${cmd(steps[1])}</div>` : "";
+}
+// ---- run conditions (design change 0010) ----
+const offConditions = s => s.environment_status === "outside" || s.environment_status === "unknown";
+function waitNote(x) {
+  const w = x.run?.waiting;
+  if (!w) return "";
+  return `${w.reasons?.[0] ?? ""} · waiting since ${when(w.since)}, until ${when(w.until)}`;
+}
+function readingView(r) {
+  if (!r) return `<div class="muted">No reading.</div>`;
+  const gb = v => typeof v === "number" ? `${fmt(v)} GB` : "—";
+  const rows = [["at", when(r.at)], ["CPU busy", pct(r.cpu_busy)], ["free RAM", gb(r.free_ram_gb)],
+    ["GPU free", r.gpu ? `${gb(r.gpu.free_gb)} (${gb(r.gpu.free_for_run_gb ?? r.gpu.free_gb)} for this run)` : "—"],
+    ["GPU busy", typeof r.gpu?.utilization_pct === "number" ? `${fmt(r.gpu.utilization_pct)} %` : "—"],
+    ["loaded models", r.loaded_models ? (r.loaded_models.map(m => m.name).join(", ") || "none") : "—"], ["GPU lock", r.gpu_lock ?? "—"]];
+  return `<div class="kv">${rows.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("")}</div>`;
+}
+function checksView(found) {
+  const rows = Object.entries(found || {});
+  if (!rows.length) return `<div class="muted">No conditions declared: the readings are recorded, nothing is checked.</div>`;
+  return `<div class="kv">${rows.map(([n, c]) => `<span>${esc(n)}</span><span>${pill(c.state)} ${esc(c.reason || "")}</span>`).join("")}</div>`;
+}
+function lastEnvironment(x) {
+  const envs = x.samples.map(s => s.environment).filter(e => e && e.after);
+  return envs.length ? envs.reduce((a, b) => (a.after.at > b.after.at ? a : b)) : null;
+}
+function conditionsCard(x) {
+  const c = x.plan?.conditions, run = x.run || {};
+  if (!c && !run.waits?.length) return "";
+  const declared = c ? `<div class="kv">${Object.entries(c.declared).map(([k, v]) => `<span>${esc(k)}</span><span class="mono">${esc(flat(v))}</span>`).join("")}</div>` : "";
+  const planned = c ? `<div class="sub-h">At plan time (${esc(when(c.now.at))})</div>${checksView(c.now.checks)}<p class="muted">The run would: <b>${esc(c.now.would)}</b></p>` : "";
+  const last = ["running", "waiting"].includes(x.status) ? lastEnvironment(x) : null;
+  const live = last ? `<div class="sub-h">Last reading</div>${readingView(last.after)}${checksView(last.checks)}` : "";
+  const waiting = run.waiting ? `<div class="sub-h">Waiting until ${esc(when(run.waiting.until))}</div><ul>${run.waiting.reasons.map(r => `<li>${esc(r)}</li>`).join("")}</ul>` : "";
+  const waits = run.waits?.length ? `<div class="sub-h">Waits of this run</div><div class="kv">${run.waits.map(w => `<span>${esc(when(w.since))} – ${esc(when(w.ended))}</span><span>${esc(w.outcome)}: ${esc((w.reasons || []).join("; "))}</span>`).join("")}</div>` : "";
+  return `<div class="card" style="margin-top:14px"><b>Run conditions</b>${declared}${planned}${waiting}${live}${waits}</div>`;
+}
+function environmentView(x, s) {
+  const e = s.environment;
+  if (!e) return `<h2>Run conditions</h2><div class="muted">Not recorded (a sample from before run conditions existed).</div>`;
+  const [c, setup, k] = s.sample_id.split("__");
+  const again = e.attempt > 1 ? ` · <a href="/files/${encodeURIComponent(x.eid)}/outputs/${c}/${setup}/${k}/outside-1.json" target="_blank">the first attempt (outside-1.json)</a>` : "";
+  const unloaded = e.prepared?.unloaded?.length ? `<div class="muted">Unloaded before it: ${esc(e.prepared.unloaded.map(u => u.name).join(", "))}</div>` : "";
+  return `<h2>Run conditions</h2><div style="margin-bottom:8px">${pill(e.status)} attempt ${esc(e.attempt)}${e.cold ? ` <span class="pill">cold: its time includes loading the model</span>` : ""}${again}</div>
+    ${checksView(e.checks)}${unloaded}<div class="sub-h">Before</div>${readingView(e.before)}<div class="sub-h">After</div>${readingView(e.after)}`;
+}
+function notCounted(r) {
+  const c = r.conditions;
+  if (!c?.outside_or_unknown) return "";
+  const why = Object.entries(c.reasons).map(([n, k]) => `${k} × ${n}`).join(", ");
+  return c.include_outside ? `<div class="card callout warn"><div>${c.outside_or_unknown} samples ran outside the run conditions (${esc(why)}); they are counted here.</div></div>`
+    : `<div class="card callout warn"><div><b>${c.outside_or_unknown} samples not counted</b> <span class="muted">— they ran outside the run conditions (${esc(why)}).</span></div></div>`;
 }
 function factorChart(name, levels) {
   const entries = Object.entries(levels).filter(([, s]) => typeof s.total.mean === "number");
@@ -436,14 +498,14 @@ function overview(x) {
     tile("Test cases", fmt(x.plan?.cases.length)), tile("Setups", fmt(x.plan ? Object.keys(x.plan.setups).length : null)),
     tile("Errors", fmt(errors), x.samples.length ? `${pct(errors / x.samples.length)} of samples` : ""),
     tile("Time used", duration(used)), tile("Cost", costs.length ? "$" + fmt(costs.reduce((a, b) => a + b, 0)) : "—", costs.length ? "" : "not reported")].join("")}</div>`;
-  if (!r) return tiles + `<div class="card empty" style="margin-top:14px">${x.samples.length ? "Results appear when the run completes." : "No outputs yet."}</div>`;
+  if (!r) return tiles + conditionsCard(x) + `<div class="card empty" style="margin-top:14px">${x.samples.length ? "Results appear when the run completes." : "No outputs yet."}</div>`;
   const best = r.best ? r.setups[r.best] : null;
   const answer = best ? `<div class="card answer"><div class="muted">The answer</div><div class="big">${chips(best.params)}</div>
     <div class="muted">Mean total <b style="color:var(--text)">${fmt(best.total.mean)}</b> (95% interval ${fmt(best.total.low)} to ${fmt(best.total.high)}) · wins ${best.wins} of ${x.plan.cases.length} cases · pass rate ${pct(best.pass_rate)}</div>
     ${Object.entries(r.baselines).map(([b, diffs]) => diffs[r.best] ? `<div class="muted" style="margin-top:4px">Against baseline <b>${esc(b)}</b>: ${signed(diffs[r.best].diff)} ${diffs[r.best].clear ? `<span class="pill ok">clearly better</span>` : `<span class="pill">not a clear difference</span>`}</div>` : `<div class="muted" style="margin-top:4px">The baseline <b>${esc(b)}</b> is the best setup.</div>`).join("")}</div>` : "";
   const charts = Object.entries(r.factors).map(([f, levels]) => factorChart(f, levels)).join("");
   const humans = Object.keys(x.human || {});
-  return tiles + answer + (charts ? `<h2>Which value of each setting wins</h2><div class="cards">${charts}</div>` : "") +
+  return tiles + notCounted(r) + answer + conditionsCard(x) + (charts ? `<h2>Which value of each setting wins</h2><div class="cards">${charts}</div>` : "") +
     (humans.length ? `<h2>Your ratings</h2><div class="cards">${humans.map(h => `<div class="card row"><div><b>${esc(x.human[h].question)}</b><div class="muted">${esc(h)} · scale ${x.human[h].scale.join("–")}</div></div><a class="btn primary" href="#/rate/${esc(x.eid)}/${esc(h)}">Rate</a></div>`).join("")}</div>` : "");
 }
 function resultsTab(x, el) {
@@ -451,19 +513,22 @@ function resultsTab(x, el) {
   if (!r) { el.innerHTML = `<div class="card empty">No results yet.</div>`; return; }
   const factors = Object.keys(x.factors), crit = [...new Set(Object.values(r.setups).flatMap(s => Object.keys(s.criteria)))];
   const max = Math.max(...Object.values(r.setups).map(s => s.total.high ?? s.total.mean ?? 0), 0.0001);
-  el.innerHTML = `<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
+  el.innerHTML = `${notCounted(r)}<h2 style="margin-top:0">Setups, best first</h2><div id="rs"></div>${Object.keys(r.baselines).map(b => `<h2>Against baseline ${esc(b)}</h2><div id="rb-${esc(b)}"></div>`).join("")}
     ${Object.keys(r.agreement || {}).length ? `<h2>Judge agreement</h2><div class="card kv">${Object.entries(r.agreement).map(([k, v]) => `<span>${esc(k)}</span><span>mean difference ${fmt(v)}</span>`).join("")}</div>` : ""}`;
   table($("rs"), [
-    ...factors.map(f => ({label: f, get: s => s.params[f]})),
-    {label: "Total (95% interval)", num: true, get: s => s.total.mean, html: s => scorebar(s.total.mean, {low: s.total.low, high: s.total.high, win: s.id === r.best, max})},
+    ...factors.map(f => ({label: f, get: s => s.params[f], ...(f === "model" ? {html: s => esc(s.params[f]) + (s.asked_differently ? ` <span class="pill info" title="its model gets its own prompt or inputs">asked differently</span>` : "")} : {})})),
+    {label: "Cases", title: "applicable cases of all (a model cannot do some cases)", num: true, get: s => s.applicable?.cases, html: s => s.applicable ? `${s.applicable.cases} of ${s.applicable.of}${s.applicable.not_applicable ? ` <span class="muted" title="${esc(Object.keys(s.applicable.needs).join(", "))}">(${s.applicable.not_applicable} not applicable)</span>` : ""}` : ""},
+    {label: "Total (95% interval)", num: true, get: s => s.total.mean, html: s => !s.samples && (s.outside || s.unknown) ? `<span class="muted">no samples in conditions</span>` : scorebar(s.total.mean, {low: s.total.low, high: s.total.high, win: s.id === r.best, max})},
     {key: "wins", label: "Wins", num: true}, {key: "pass_rate", label: "Pass rate", num: true, html: s => esc(pct(s.pass_rate))},
     {key: "errors", label: "Errors", num: true},
+    {label: "Not counted", title: "samples outside the run conditions", num: true, get: s => (s.outside || 0) + (s.unknown || 0)},
     ...crit.map(c => ({label: c, num: true, get: s => s.criteria[c], html: s => scorebar(s.criteria[c])})),
   ], r.ranking.map(id => ({id, ...r.setups[id]})), {rowClass: s => s.id === r.best ? "win" : ""});
   for (const [b, diffs] of Object.entries(r.baselines))
     table($(`rb-${b}`), [...factors.map(f => ({label: f, get: s => r.setups[s.id].params[f]})),
       {key: "diff", label: "Difference", num: true, html: s => esc(signed(s.diff))},
-      {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`}],
+      {label: "95% interval", get: s => `${fmt(s.low)} to ${fmt(s.high)}`}, {label: "Clear", get: s => s.clear ? "yes" : "no", html: s => s.clear ? `<span class="pill ok">clear</span>` : `<span class="pill">not clear</span>`},
+      {key: "shared_cases", label: "Shared cases", title: "the cases both setups can do", num: true}],
       Object.entries(diffs).map(([id, v]) => ({id, ...v})));
 }
 async function sampleDrawer(x, s) {
@@ -471,12 +536,13 @@ async function sampleDrawer(x, s) {
   const base = `outputs/${c}/${setup}/${k}/files`;
   const res = await fetch(`/files/${encodeURIComponent(x.eid)}/outputs/${c}/${setup}/${k}/result.json`).then(r => r.ok ? r.json() : null).catch(() => null);
   const files = res ? Object.keys(res.files || {}) : [];
-  openDrawer(s.sample_id, `<div style="margin:14px 0">${chips(s.params)} ${s.winner ? `<span class="pill accent">case winner</span>` : ""} ${s.error ? `<span class="pill bad">error</span>` : ""}</div>
+  openDrawer(s.sample_id, `<div style="margin:14px 0">${chips(s.params)} ${s.winner ? `<span class="pill accent">case winner</span>` : ""} ${s.error ? `<span class="pill bad">error</span>` : ""} ${offConditions(s) ? `${pill(s.environment_status)} <span class="muted">not counted</span>` : ""}</div>
     ${s.error ? `<pre style="color:var(--bad)">${esc(s.error)}</pre>` : ""}
     ${res && res.data !== null && res.data !== undefined ? `<h2>Output</h2>${outputView(res.data)}` : ""}
     ${files.length ? `<h2>Files</h2>${files.map(n => fileView(x.eid, base, n)).join("")}` : ""}
     <h2>Scores</h2><div class="kv">${Object.entries(s.scores).map(([n, v]) => `<span>${esc(n)}</span><span>${scorebar(v)}</span>`).join("")}<span>total</span><span>${scorebar(s.total, {win: s.winner})}</span></div>
     <h2>Measurements</h2><div class="kv">${Object.entries(s.measurements).map(([n, v]) => `<span>${esc(n)}</span><span>${esc(fmt(v))}</span>`).join("")}</div>
+    ${environmentView(x, s)}
     ${res?.log ? `<details><summary>Log</summary><pre>${esc(res.log)}</pre></details>` : ""}`);
 }
 function samplesTab(x, el) {
@@ -487,8 +553,27 @@ function samplesTab(x, el) {
     {key: "total", label: "Total", num: true, html: s => scorebar(s.total, {win: s.winner})},
     ...scores.map(n => ({label: n, num: true, get: s => s.scores[n] ?? null, html: s => scorebar(s.scores[n] ?? null)})),
     {label: "Time (s)", title: "measured seconds", num: true, get: s => s.measurements.seconds ?? null},
-    {label: "Status", get: s => s.error ? "error" : s.winner ? "winner" : "", html: s => s.error ? `<span class="pill bad" title="${esc(s.error)}">error</span>` : s.winner ? `<span class="pill accent">winner</span>` : ""}],
-    x.samples, {onRow: s => sampleDrawer(x, s), rowClass: s => s.winner ? "win" : "", empty: "No outputs yet."});
+    {label: "Status", get: s => offConditions(s) ? s.environment_status : s.error ? "error" : s.winner ? "winner" : "",
+      html: s => offConditions(s) ? `<span class="pill warn" title="${esc((s.off_conditions || []).join(", "))}">${esc(s.environment_status)}</span>` : s.error ? `<span class="pill bad" title="${esc(s.error)}">error</span>` : s.winner ? `<span class="pill accent">winner</span>` : ""}],
+    x.samples, {onRow: s => sampleDrawer(x, s), rowClass: s => offConditions(s) ? "off" : s.winner ? "win" : "", empty: "No outputs yet."});
+}
+// ---- models: guides, how each model is asked, cells a model cannot do (design change 0011) ----
+function guideView(id, m) {
+  const g = m.guide, feats = (g?.features || []).map(f => `<span class="chip" title="${esc(f.how || "")}">${esc(f.name)}</span>`).join("");
+  const limits = ["sizes", "durations_s", "max_duration_s", "max_references"].filter(k => g?.[k] != null).map(k => `${k}: ${esc(JSON.stringify(g[k]))}`).join(" · ");
+  const inst = m.installed === "no" ? `<span class="pill bad">not installed</span> ${cmd(m.install)}` : `<span class="pill">installed: ${esc(m.installed)}</span>`;
+  const lic = m.commercial_use === false ? `<span class="pill warn">non-commercial</span>` : "";
+  return `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><b class="mono">${esc(id)}</b> ${inst} ${lic} <span class="muted">${esc(m.license || "")}</span>
+    ${g ? `<div>${esc(g.summary || "")}</div>${g.prompt ? `<div class="muted">Prompt: ${esc(g.prompt)}</div>` : ""}${feats ? `<div>${feats}</div>` : ""}${limits ? `<div class="muted">${limits}</div>` : ""}<div class="muted">${esc(g.source || "")} ${g.checked ? `checked ${esc(g.checked)}` : ""}</div>` : `<div class="muted">No guide for this model.</div>`}</div>`;
+}
+function modelsCard(x) {
+  const p = x.plan || {}, models = p.models || {}, asked = p.asked || {}, na = p.applicability?.not_applicable || [], unsure = p.applicability?.need_unknown || [];
+  if (!Object.keys(models).length && !Object.keys(asked).length && !na.length && !unsure.length) return "";
+  const guidesHtml = Object.keys(models).length ? `<div class="sub-h">Model guides</div>${Object.entries(models).map(([id, m]) => guideView(id, m)).join("")}` : "";
+  const askedHtml = Object.entries(asked).filter(([, a]) => a.asked_differently).map(([sid, a]) => `<li><span class="mono">${esc(sid)}</span> <span class="pill info">asked differently</span> prompt <span class="mono">${esc(a.prompt)}</span>, inputs <span class="mono">${esc(JSON.stringify(a.inputs))}</span>${Object.keys(a.case_overrides || {}).length ? `, case overrides: ${esc(Object.keys(a.case_overrides).join(", "))}` : ""}</li>`).join("");
+  const naHtml = na.length ? `<div class="sub-h">Not applicable: ${na.length} cells not run</div><ul>${na.map(c => `<li>${esc(c.case)} × <span class="mono">${esc(c.setup)}</span>: ${esc(c.unmet.join("; "))}</li>`).join("")}</ul>` : "";
+  const unsureHtml = unsure.length ? `<div class="sub-h">need_unknown: ${unsure.length} cells run without knowing</div><ul>${unsure.map(c => `<li>${esc(c.case)} × <span class="mono">${esc(c.setup)}</span>: ${esc(c.needs.join("; "))}</li>`).join("")}</ul>` : "";
+  return `<div class="card" style="margin-top:14px"><b>Models</b>${guidesHtml}${askedHtml ? `<div class="sub-h">How each model is asked</div><ul>${askedHtml}</ul>` : ""}${naHtml}${unsureHtml}</div>`;
 }
 function planTab(x, el) {
   const p = x.plan;
@@ -497,7 +582,7 @@ function planTab(x, el) {
   el.innerHTML = `<div class="grid">${[tile("Outputs", fmt(p.outputs), `${p.cases.length} cases × ${Object.keys(p.setups).length} setups × ${p.samples}`), tile("Judge calls", fmt(p.judge_calls)),
       tile("Estimated time", e.seconds === null ? "—" : duration(e.seconds)), tile("Estimated cost", e.money_usd === null ? "—" : "$" + fmt(e.money_usd)), tile("Subject", esc(p.subject))].join("")}</div>
     <p class="muted">Estimate: ${esc(e.from)}. Planned ${esc(when(p.planned_at))}.</p>
-    <h2>What runs</h2>${p.commands.map(c => `<pre>${esc(c)}</pre>`).join("")}
+    <h2>What runs</h2>${p.commands.map(c => `<pre>${esc(c)}</pre>`).join("")}${conditionsCard(x)}${modelsCard(x)}
     <h2>Setups</h2><div id="ps"></div><h2>Test cases</h2><div class="card">${p.cases.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>`;
   const factors = Object.keys(x.factors), bases = new Set(Object.values(p.baselines));
   table($("ps"), [{key: "id", label: "Setup", html: s => `<span class="mono">${esc(s.id)}</span>${bases.has(s.id) ? ` <span class="pill info">baseline</span>` : ""}`},
@@ -514,7 +599,7 @@ async function showExperiment(eid, tab) {
   else if (tab === "results") resultsTab(x, el);
   else if (tab === "samples") samplesTab(x, el);
   else if (tab === "plan") planTab(x, el);
-  else if (tab === "definition") el.innerHTML = `<p class="muted" style="margin-top:0">The definition as written (values of secret-named keys are hidden).</p><pre style="max-height:none">${esc(x.definition)}</pre>`;
+  else if (tab === "definition") el.innerHTML = `<p class="muted" style="margin-top:0">The definition as written (values of secret-named keys are hidden).</p><pre style="max-height:none">${esc(x.definition)}</pre>${modelsCard(x)}`;
   else el.innerHTML = x.reviews.length ? `<div class="card">${x.reviews.slice().reverse().map(r => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--border)"><div>${pill(r.decision)} <b>${esc(r.by)}</b> <span class="muted">${esc(r.note || "")}</span></div><span class="muted">${esc(when(r.at))}</span></div>`).join("")}</div>` : `<div class="card empty">No decisions yet.</div>`;
   if (x.status === "proposed" && x.plan) {
     const decide = async decision => {
@@ -523,7 +608,7 @@ async function showExperiment(eid, tab) {
     };
     $("approve").onclick = () => decide("approve"); $("deny").onclick = () => decide("deny");
   }
-  if (x.status === "running") refresh = setTimeout(route, 4000);
+  if (x.status === "running" || x.status === "waiting") refresh = setTimeout(route, 4000);
 }
 async function showRate(eid, criterion) {
   const o = await get(`/api/experiments/${eid}/rate/${criterion}`);

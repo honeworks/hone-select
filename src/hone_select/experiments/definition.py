@@ -22,15 +22,25 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class GenerateSpec(_Model):
-    """`[generate]`: the subject under test (design change 0009 §2a)."""
+class PerModelSpec(_Model):
+    """`[generate.per_model."<model>"]`: how one model is asked (design change 0011 §2)."""
 
-    kind: Literal["prompt", "python", "command"]
-    client: str | None = None  # prompt: "module:factory" returning a TextClient
+    prompt: str | None = None  # replaces [generate] prompt for this model
+    inputs: dict[str, Any] = Field(default_factory=dict[str, Any])  # merged over [generate] inputs
+
+
+class GenerateSpec(_Model):
+    """`[generate]`: the subject under test (design change 0009 §2a, 0011 §1)."""
+
+    kind: Literal["prompt", "python", "command", "generate"]
+    client: str | None = None  # prompt / generate: "module:factory" or an entry-point name
     client_args: dict[str, Any] = Field(default_factory=dict[str, Any])
     prompt: str = "{prompt}"  # prompt: a template, or "{prompt}" to take the file named by the factor
     system: str | None = None
-    output: Literal["text", "json"] = "text"
+    output: str = "text"  # prompt: "text" | "json"; generate: the output file name in the workdir
+    inputs: dict[str, Any] = Field(default_factory=dict[str, Any])  # generate: named inputs, placeholders
+    per_model: dict[str, PerModelSpec] = Field(default_factory=dict[str, PerModelSpec])
+    guides: str | None = None  # a `hone.model_guides` entry point or "module:factory" (design change 0011)
     params: list[str] | None = (
         None  # prompt: factors passed to the model call (default: all but model/prompt)
     )
@@ -70,6 +80,40 @@ class BudgetSpec(_Model):
     seconds: float | None = Field(default=None, gt=0)
 
 
+CHECKS = (
+    "max_cpu_load",
+    "min_free_ram_gb",
+    "min_free_vram_gb",
+    "max_gpu_utilization_pct",
+    "only_needed_models",
+    "models_on_gpu",
+    "gpu_lock",
+)
+
+
+class ConditionsSpec(_Model):
+    """`[conditions]`: the state of the machine the experiment needs (design change 0010 §1). A key that is
+    not set is not checked."""
+
+    max_cpu_load: float | None = Field(default=None, ge=0, le=1)  # share of all cores busy over a window
+    min_free_ram_gb: float | None = Field(default=None, ge=0)  # MemAvailable
+    min_free_vram_gb: float | None = Field(default=None, ge=0)  # GPU 0, not counting the needed models
+    max_gpu_utilization_pct: float | None = Field(default=None, ge=0, le=100)
+    only_needed_models: bool = False  # unload the other models through the probe
+    models_on_gpu: bool = False  # the needed models must be fully in VRAM
+    models: list[str] | None = None  # the needed models (placeholders as in `command`)
+    gpu_lock: bool | str = False  # hold the machine-wide GPU lock for the whole run (true, or a path)
+    if_busy: Literal["block", "unload"] = "block"  # passed to the probe's prepare
+    warm_up: bool = False  # load the missing needed models before a sample (the probe's `load`)
+    on_violation: Literal["wait", "stop", "record_only"] = "wait"
+    wait_timeout: float = Field(default=1800.0, gt=0)  # seconds one wait may last
+    probe: str | None = None  # a `hone.machine_probes` entry point, e.g. "hone_models:machine"
+
+    def declared(self) -> list[str]:
+        """The conditions this experiment checks, in a fixed order."""
+        return [name for name in CHECKS if getattr(self, name) not in (None, False, "")]
+
+
 class HumanScorer(_Model):
     kind: Literal["human"]
     question: str
@@ -94,6 +138,7 @@ class ExperimentSpec(_Model):
     scorers: dict[str, dict[str, Any]] = Field(default_factory=dict[str, dict[str, Any]])
     budget: BudgetSpec = BudgetSpec()
     run: RunSpec = RunSpec()
+    conditions: ConditionsSpec = ConditionsSpec()
 
     def human_scorers(self) -> dict[str, HumanScorer]:
         return {n: HumanScorer.model_validate(s) for n, s in self.scorers.items() if s.get("kind") == "human"}
@@ -117,10 +162,18 @@ def load(folder: Path) -> ExperimentSpec:
 
 def _check(spec: ExperimentSpec) -> None:
     g = spec.generate
-    needed = {"prompt": g.client, "python": g.function, "command": g.command}[g.kind]
-    if not needed:
-        field = {"prompt": "client", "python": "function", "command": "command"}[g.kind]
+    field = {"prompt": "client", "python": "function", "command": "command", "generate": "client"}[g.kind]
+    if not getattr(g, field):
         raise ConfigError(f"[generate] kind = {g.kind!r} needs `{field}`")
+    if g.kind == "prompt" and g.output not in ("text", "json"):
+        raise ConfigError(f'[generate] output of a prompt subject is "text" or "json", not {g.output!r}')
+    if g.kind == "generate" and (Path(g.output).is_absolute() or ".." in Path(g.output).parts):
+        raise ConfigError(f"[generate] output {g.output!r} must be a file name inside the sample's folder")
+    if g.per_model and g.kind not in ("prompt", "generate"):
+        raise ConfigError(
+            "[generate.per_model] applies to prompt and generate subjects; a python or command subject "
+            "reads setup['model'] itself"
+        )
     if spec.design.kind == "list" and not spec.setup:
         raise ConfigError('design kind = "list" needs [[setup]] entries')
     for base in spec.baseline:

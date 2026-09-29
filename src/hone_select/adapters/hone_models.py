@@ -1,15 +1,19 @@
-"""Resolver for ``client = "hone_models:decision"`` in ``[judges.<name>]`` (extra ``hone-select[models]``).
-
-Registered as the ``hone.decision_clients`` entry point ``hone_models:decision`` (design/decisions.md D-002).
+"""Resolvers for hone-models (extra ``hone-select[models]``): ``client = "hone_models:decision"`` in
+``[judges.<name>]`` (the ``hone.decision_clients`` entry point, design/decisions.md D-002) and
+``probe = "hone_models:machine"`` in an experiment's ``[conditions]`` (the ``hone.machine_probes`` entry
+point, design change 0010 §6) and ``guides = "hone_models:guides"`` in ``[generate]`` (the
+``hone.model_guides`` entry point, design change 0011 §5). ``hone_models`` is imported only when called.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from hone_select.errors import ConfigError
-from hone_select.ports import DecisionClient
+from hone_select.ports import DecisionClient, MachineProbe, ModelGuides
 
 
 def decision(model: str, **options: Any) -> DecisionClient:
@@ -22,3 +26,62 @@ def decision(model: str, **options: Any) -> DecisionClient:
             "or pass judges={...} to Engine"
         ) from e
     return hone_models.decision(model, **options)
+
+
+def machine() -> MachineProbe:
+    """``hone_models.machine.Machine()``: the model state for experiment run conditions."""
+    try:
+        module = importlib.import_module("hone_models.machine")
+    except ModuleNotFoundError as e:
+        raise ConfigError(
+            'probe "hone_models:machine" needs hone-models with its machine probe; install '
+            "hone-select[models] (or update hone-models), or remove `probe` from [conditions]"
+        ) from e
+    return module.Machine()
+
+
+def guides() -> ModelGuides:
+    """``hone_models.guide(model_id)`` as a ``ModelGuides`` source: what each model can take."""
+    try:
+        hone_models = importlib.import_module("hone_models")
+    except ModuleNotFoundError as e:
+        raise ConfigError(
+            'guides "hone_models:guides" needs hone-models; install hone-select[models], or remove `guides` '
+            "from [generate] (then every need of a case is need_unknown)"
+        ) from e
+    if not hasattr(hone_models, "guide"):
+        raise ConfigError(
+            'guides "hone_models:guides" needs a hone-models with model guides (its change 0015); update '
+            "hone-models, or remove `guides` from [generate]"
+        )
+    return _Guides(hone_models)
+
+
+class _Guides:
+    def __init__(self, hone_models: Any) -> None:
+        self.mk = hone_models
+
+    def guide(self, model_id: str) -> Mapping[str, Any] | None:
+        try:
+            found = self.mk.guide(model_id)
+        except getattr(self.mk, "ConfigError", LookupError):  # an id the registry does not know
+            return None
+        return None if found is None else _as_json(found, model_id)
+
+
+def _as_json(guide: object, model_id: str) -> dict[str, Any]:
+    """The guide's JSON form (a mapping, ``to_json()``, ``model_dump()`` or a dataclass), with its text."""
+    found: Any = guide
+    if isinstance(found, Mapping):
+        out: dict[str, Any] = dict(cast(Mapping[str, Any], found))
+    elif hasattr(found, "to_json"):
+        out = dict(found.to_json())
+    elif hasattr(found, "model_dump"):
+        out = dict(found.model_dump(mode="json"))
+    else:
+        out = dataclasses.asdict(found)
+    as_text = getattr(guide, "as_text", None)
+    if callable(as_text):
+        out.setdefault("text", str(as_text()))
+    out.setdefault("install", f"hone-models models install {model_id}")
+    return out

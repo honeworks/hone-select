@@ -516,10 +516,38 @@ one entry point itself, `hone_models:decision`, which imports the `hone_models` 
 ### 7.9 Fakes and contract checkers
 
 `hone_select.testing` exports deterministic, scriptable fakes that record every call (`fake.calls`):
-`FakeDecisionClient`, `FakeTextClient`, `FakeEmbedder` (similarity only where scripted) and `MemorySink`.
-It also exports the contract checkers `check_decision_client`, `check_text_client`, `check_embedder` and
-`check_record_sink`. The fakes pass them. A provider of a port runs the same checkers against its real
+`FakeDecisionClient`, `FakeTextClient`, `FakeEmbedder` (similarity only where scripted), `FakeMachineProbe`
+(scripted snapshots and a live list of loaded models, §7.10), `FakeModelGuides` (scripted guides, §7.11)
+and `MemorySink`. It also exports the contract checkers `check_decision_client`, `check_text_client`,
+`check_embedder`, `check_record_sink`, `check_machine_probe` and `check_model_guides`. The fakes pass them. A provider of a port runs the same checkers against its real
 implementation.
+
+### 7.10 `MachineProbe`
+
+The machine's model state for an experiment's run conditions (design change
+[0010](changes/0010-run-conditions.md) §6), provided by hone-models (`hone_models.machine.Machine`):
+`snapshot()` returns the GPUs (`None` when no reader answered), the model servers (`running`: True, False or
+None), the loaded models (`server`, `name`, registry `model_id`, `size_gb`, `vram_gb`), the GPU lock and the
+leases; `prepare(needed, *, if_busy="block")` unloads every model that is not needed (never loads one, never
+waits; with `if_busy="block"` it unloads nothing while another process holds a lease or the lock) and returns
+`blocked_by`, `unloaded`, `errors`, `missing`, `loaded_models` and `need_gb`. An optional `load(model_id)`
+(detected with `hasattr`) warms a model up. Every key is optional; an unknown value is `None`, never 0.
+`[conditions] probe = "<name>"` resolves by exact name in the entry-point group `hone.machine_probes`; the
+factory is called with no arguments. hone-select registers `hone_models:machine`, which imports
+`hone_models.machine` lazily (extra `models`) and raises `ConfigError` naming the extra when it is missing.
+
+### 7.11 `ModelGuides`
+
+What each model can take, for model-aware experiments (design change
+[0011](changes/0011-model-aware-experiments.md) §5), provided by hone-models (`mk.guide`):
+`guide(model_id) -> Mapping | None` returns the guide as JSON (`id`, `kind`, `summary`, `prompt`,
+`inputs`, `features` with `name`, `how`, `input`, `examples`, `source`; `source`, `checked`, `license`,
+`commercial_use`, `sizes`, `durations_s`, `max_duration_s`, `max_references`, `installed` (`yes` / `no` /
+`unknown`), `install`), or `None` for a model the source does not know. Every key is optional.
+`[generate] guides = "<name>"` resolves by exact name in the entry-point group `hone.model_guides`, else as
+a `module:factory` (called with no arguments); it defaults to `hone_models:guides` when the client is a
+`hone_models:*` factory. hone-select registers `hone_models:guides`, which imports `hone_models` lazily
+(extra `models`) and raises `ConfigError` naming the extra when it is missing (design/decisions.md D-020).
 
 ## 8. Records
 
@@ -584,7 +612,7 @@ and `hone-select explain <run_id>` give the same text.
 |---|---|---|
 | `openai` | `hone_select.adapters.openai` | `OpenAITextClient`, `OpenAIDecisionClient` over an OpenAI SDK client (also any OpenAI-compatible server, such as Ollama's `/v1`) |
 | `langchain` | `hone_select.adapters.langchain` | `LangChainTextClient`, `LangChainDecisionClient` over any LangChain chat model |
-| `models` | `hone_select.adapters.hone_models` | the `hone_models:decision` judge entry point (§7.8) |
+| `models` | `hone_select.adapters.hone_models` | the `hone_models:decision` judge entry point (§7.8), the `hone_models:machine` probe (§7.10) and the `hone_models:guides` guide source (§7.11); generate subjects reach `hone_models:image` / `:music` / `:video` through hone-models' own entry points |
 
 The decision clients are emulated over a text client: all questions go into one prompt that asks for
 `{name: {"rationale", "answer"}}` (through `response_format` JSON schema with OpenAI, through an
@@ -603,7 +631,8 @@ hone-select explain RUN_ID [--db PATH]
 hone-select show RUN_ID [--db PATH] [--json]
 hone-select dashboard [--db PATH] [--project PATH] [--host 127.0.0.1] [--port 8788] [--open]
 hone-select experiments new TITLE | plan EID [--pilot] | approve EID [--note] | deny EID --note
-hone-select experiments start EID | stop EID | status [EID] | list | report EID      (all: [--project PATH])
+hone-select experiments start EID | stop EID | status [EID] | list | report EID [--include-outside]
+                                                                                     (all: [--project PATH])
 ```
 
 `run` uses the top-level components of the registry module; `explain` rebuilds the decision from the
@@ -655,6 +684,16 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 | AC-26 | Experiment subjects | prompt, python and command subjects; every sample records data, files, seconds, peak memory, exit code, log; an exception, a non-zero exit, a timeout, a missing program or non-JSON output is a recorded error, never a crash; `TransientError` / exit 75 is retried |
 | AC-27 | Running and results | a stopped run resumes without redoing samples; the budget stops it; each case is a selection recorded with `hone.run_id = EID` and `hone.item = case`; results per setup, factor level and baseline find the known best setup, with intervals, wins and pass rates; `keep_files` and scorer agreement as declared |
 | AC-28 | Experiment cases | from `cases.toml` fields, from one folder of files per case, or from an earlier experiment's winners or all outputs (its data and files as inputs); duplicate or missing cases are errors |
+| AC-30 | Run conditions in the definition and the plan | `[conditions]` is validated (unknown keys, bad values); `only_needed_models` / `models_on_gpu` without a probe, `min_free_vram_gb` for a prompt subject without a probe, `gpu_lock` with a `gpu-lock.sh` wrap and unresolvable `models` placeholders are `ConfigError`s that say what to change; `plan.json` shows the declared conditions, the needed models per setup and the current reading with `ok` / `outside` / `unknown` per check and what the run would do; `plan` unloads nothing; editing a condition makes the experiment a draft; a pilot on a busy machine is refused |
+| AC-31 | Waiting and stopping | a busy reading before a sample: `run.json` is `waiting` with the reasons and `status` reports `waiting`; `start` refuses a waiting experiment; a good reading continues the run; `STOP` ends a wait; `wait_timeout` stops the run with `stopped_because`; `on_violation = "stop"` stops at once; `record_only` runs and marks; `start` resumes a stopped run; waiting time is in no sample's seconds or the budget |
+| AC-32 | The environment and the results | every sample's `result.json` has `environment` with before / after readings, checks and status, also without `[conditions]` (`not_checked`); a sample outside after it ran is set aside as `outside-1.json` and run once more, a second outside run is kept and marked; `outside` and `unknown` samples are left out of every number and of the selection, counted per setup and factor level with reasons; `report --include-outside` counts them and says so; old `result.json` files without an environment count as before |
+| AC-33 | Needed models, the probe and unknowns | `prepare` gets the setup's model for a prompt subject, the declared `models` or nothing for python / command subjects, and unloads the previous group's model; `prepare`'s answer is in the environment; `blocked_by` makes the run wait, `if_busy = "unload"` unloads anyway; an unload error is `outside` (`unknown` for a server that did not answer); `missing` marks the sample `cold` unless `warm_up` loads it; `min_free_vram_gb` does not count the needed models; `models_on_gpu` marks a partly offloaded model; `gpus: None` falls back to `nvidia-smi`, then `unknown`; a server with `running: None` and a raising probe are `unknown`; a declared check that cannot be measured refuses `start`; `probe = "hone_models:machine"` without hone-models is a `ConfigError` naming the extra |
+| AC-34 | The GPU lock | with `gpu_lock`, no other process takes the lock during the run (samples, waits and scoring) and one can right after; the holder file is written and removed; a lock held elsewhere makes the run wait and stop at `wait_timeout`; with `HONE_GPU_LOCK_HELD=1` the lock is not taken again; subjects receive `HONE_GPU_LOCK_HELD=1`; a killed run releases the lock |
+| AC-35 | Run conditions in the dashboard | the list shows the `waiting` status and reason; an experiment shows the run-conditions card with the plan's reading before approval and the waits; each sample carries its environment; outside samples are marked and the results say how many were not counted |
+| AC-36 | A generate subject (design change 0011) | each sample calls `generate` with its seed, `out` in the workdir and the filled inputs (a case file as a `Path`, a one-placeholder input keeps its type); the candidate has the files and the measurements (`elapsed_s`, `cost_usd`, `cost_estimated`), license and `commercial_use` in its meta; `refused` is a failed sample with its `error_kind`; `out_of_memory` with conditions is `outside` and runs once more, without conditions a failure; one client session per model group; a pilot ends its session |
+| AC-37 | Per-model overrides | `[generate.per_model]`, a case's `per_model` and `prompts/<model>/<file>` give each model its own prompt and inputs, the others the shared ones; `plan.json` `asked` shows the resolved prompt and inputs per setup and marks setups asked differently, as do the results and the summary; judges and scorers see only the case's shared fields (`judge_view`); an override naming no factor or case field, or a model the experiment does not run, is a `ConfigError` at plan time |
+| AC-38 | Needs | cells whose model lacks a needed feature or limit (a case's need or a factor value) are not applicable: listed with the unmet need in the plan and the CLI, not run, not failures, not in `outputs`; an undeclared limit runs and is marked `need_unknown`; per-setup numbers are over applicable cases with the count; baseline differences, wins and losses and factor levels use only shared cases and say how many; the summary lists what each model could not do; without a guide source every need is `need_unknown` |
+| AC-39 | Model guides | `plan.json` `models` stores each model's guide, installed state, install command and license, and the dashboard shows them; `{model_guide}` (of `target_model`, else `model`) and `ctx.model_guide` get the stored guide; results carry license and `commercial_use` and the summary marks a non-commercial model without removing it; a model reported not installed makes `start` refuse, naming the install command, until the source reports it installed; without hone-select[models] a declared `hone_models:guides` is a `ConfigError` naming the extra; `FakeModelGuides` passes `check_model_guides` |
 | AC-29 | Ratings and the Experiments page | human criteria are rated blind in a fixed random order and join the results; the dashboard lists and shows experiments, approves or denies them, takes ratings and serves their files; writes without the page's header or from another origin, and paths outside `cases/` and `outputs/`, are refused |
 
 ## 11. Not in v0.1
@@ -673,14 +712,15 @@ The behaviour hone-select guarantees. Each case has a test in `tests/e2e/test_ac
 Design change [0009](changes/0009-experiments.md); user guide [docs/experiments.md](../docs/experiments.md).
 An experiment is a folder `experiments/E000N-<slug>/` in a project: `experiment.toml` (title, question,
 cases, samples, seed, registry, `[generate]` subject, `[factors]`, `[design]`, `[[baseline]]`, `[criteria]`,
-`[judges.*]`, `[scorers.*]`, `[budget]`, `[run]`), `cases/`, `prompts/`, `scripts/`, and what hone-select
+`[judges.*]`, `[scorers.*]`, `[budget]`, `[run]`, `[conditions]`), `cases/`, `prompts/`, `scripts/`, and what hone-select
 writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `results/`.
 
 - **Status** comes from the files: draft (no plan, or the definition changed since), proposed, approved /
-  denied (the last decision on the current plan's definition hash), running / stopped / completed.
+  denied (the last decision on the current plan's definition hash), running / waiting / stopped / completed.
 - **Subjects:** `prompt` (a `TextClient` from a `module:factory`), `python` (`function(case, setup, ctx)` in
-  its own interpreter), `command` (any program, placeholders, JSON on stdin, `wait4` peak memory). A
-  failure is a result; the implicit gate `ran_ok` rejects it.
+  its own interpreter), `command` (any program, placeholders, JSON on stdin, `wait4` peak memory),
+  `generate` (an image, music or video client, design change 0011). A failure is a result; the implicit
+  gate `ran_ok` rejects it.
 - **Secrets and costs:** `env` values may be `$VAR` references; logs, errors and the served definition are
   scrubbed (secret-named keys are `***`); an unreported cost is `None`, never 0.
 - **Running:** one run at a time (a live run or a completed experiment refuses `start`); samples in
@@ -691,3 +731,32 @@ writes: `plan.json`, `review.json`, `run.json`, `outputs/`, `ratings.jsonl`, `re
   interval over cases, pass rate, errors, wins, criteria, measurements, money, human ratings; scorer
   agreement for `compare` pairs. `hone_select.experiments` is the Python API (`Project`, `start`, `stop`,
   `report`, `Ctx`, `TransientError`).
+- **Run conditions** (design change [0010](changes/0010-run-conditions.md)): `[conditions]` declares the
+  machine state an experiment needs (CPU busy share, free RAM, free VRAM not counting the needed models, GPU
+  utilization, only the needed models loaded, the needed models fully on the GPU, the machine-wide GPU lock
+  for the whole run). The check runs before the first sample, between samples and after the last:
+  `after_group` hook, the probe's `prepare` for the next sample (and `load` with `warm_up`), a reading
+  (`/proc`, `nvidia-smi` or the probe), a judgement `ok` / `outside` / `unknown` per condition. On a
+  violation the run waits (`run.json` `waiting`, `waits`; STOP or `wait_timeout` end it), stops
+  (`stopped_because`) or records only; a sample outside after it ran is set aside as `outside-1.json` and
+  run once more. Every `result.json` has an `environment` (readings, checks, status, prepared, `cold`,
+  attempt); outside and unknown samples are left out of every number and of the selection (scored apart
+  for `report --include-outside`); a cold sample's `seconds` are left out. An unmeasurable declared check
+  refuses `start`. `plan.json` gains `conditions` (declared, needed models per setup, a reading now and
+  what the run would do). Samples' candidate meta carries `environment_status`. `start` and `Project.plan`
+  take `sources=` (where the readings come from; tests pass fakes).
+- **Model-aware experiments** (design change [0011](changes/0011-model-aware-experiments.md)): the
+  `generate` subject calls `client(model).generate(prompt, out=<workdir>/<output>, seed=, timeout_s=, trace=,
+  **inputs)` (clients through `hone.<kind>_clients` or a `module:factory`, D-020); the result's files are the
+  candidate (`data = {"case": <judge view>, "files": [...]}`), `elapsed_s` and `cost_usd` its measurements;
+  `error_kind` is kept and `out_of_memory` with conditions is `outside` (D-025); a client `session()` is held
+  per model group. `[generate.per_model."<model>"]`, a case's `per_model` table and `prompts/<model>/<file>`
+  ask a model differently; `plan.json` `asked` shows the resolved prompt and inputs per setup and marks it,
+  as do the results, the summary and the dashboard; judges see only a case's shared fields (`judge_view`,
+  D-021). A case's `needs` and the factors `duration_s` / `size` are checked against each model's guide at
+  plan time (D-023): cells a model cannot do are not run and listed in `plan.json` `applicability`, a
+  limit the guide does not declare is `need_unknown`. The guides (§7.11) are read once into `plan.json`
+  `models` (with installed state, install command, license); `start` refuses while a model is reported not
+  installed (D-024); `{model_guide}` and `ctx.model_guide` give subjects the guide (D-022). Results carry
+  `applicable` counts per setup, baseline and factor comparisons on shared cases (D-026), `models` (license,
+  `commercial_use`, non-commercial marked, never removed) and `could_not`.

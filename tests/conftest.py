@@ -23,6 +23,26 @@ def hone_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture(autouse=True)
+def quiet_fake_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """Run conditions (design change 0010 §14): no default test reads the real /proc, calls the real
+    nvidia-smi or touches the real GPU lock. Tests that script the machine pass their own Sources."""
+    if request.node.get_closest_marker("gpu"):
+        return
+    from hone_select.experiments import conditions
+
+    proc = tmp_path / "fake-proc"
+    proc.mkdir(exist_ok=True)
+    (proc / "stat").write_text("cpu  100 0 100 800 0 0 0 0\n")
+    (proc / "meminfo").write_text("MemTotal: 33554432 kB\nMemAvailable: 16777216 kB\n")
+    quiet = conditions.Sources(proc=proc, nvidia_smi=(str(tmp_path / "no-nvidia-smi"),), sleep=lambda s: None)
+    monkeypatch.setattr(conditions, "DEFAULT", quiet)
+    monkeypatch.setenv("HONE_GPU_LOCK", str(tmp_path / "gpu.lock"))
+    monkeypatch.delenv("HONE_GPU_LOCK_HELD", raising=False)
+
+
 @pytest.fixture(scope="session")
 def gpu_lock() -> Iterator[None]:
     """Hold the machine-wide GPU lock for the session (no-op if scripts/gpu-lock.sh already holds it)."""

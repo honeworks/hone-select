@@ -17,6 +17,8 @@ __all__ = [
     "Answer",
     "DecisionClient",
     "Embedder",
+    "MachineProbe",
+    "ModelGuides",
     "Question",
     "RecordSink",
     "ScoreCache",
@@ -92,3 +94,41 @@ class ScoreCache(Protocol):
 
     def get(self, key: tuple[str, str, str, str]) -> Score | None: ...
     def put(self, key: tuple[str, str, str, str], score: Score) -> None: ...
+
+
+class MachineProbe(Protocol):
+    """The machine's model state for experiment run conditions (design change 0010 §6), provided by
+    hone-models (``hone_models.machine.Machine``); any object with this shape fits. Every key of the answers
+    is optional, and an unknown value is ``None``, never 0.
+
+    ``snapshot()`` returns ``{"time", "gpus": [{"index", "name", "memory_total_gb", "memory_used_gb",
+    "memory_free_gb", "utilization_pct", "processes": [{"pid", "name", "memory_gb"}]}] | None,
+    "servers": [{"server", "running": True | False | None, "error"}], "loaded_models": [{"server", "name",
+    "model_id", "size_gb", "vram_gb"}], "gpu_lock": {"path", "held", "holder", "mine"},
+    "leases": [{"name", "pid", "gb", "mine"}]}``.
+
+    ``prepare(needed, if_busy=...)`` makes sure only ``needed`` (registry ids) are loaded: it unloads the
+    others, never loads one and never waits; with ``if_busy="block"`` it unloads nothing while another
+    process holds a lease or the lock. It returns ``{"needed", "if_busy", "blocked_by", "unloaded",
+    "released", "errors", "missing", "loaded_models", "need_gb"}``.
+
+    Optional (checked with ``hasattr``): ``load(model_id)`` warms a model up and returns ``{"model_id",
+    "loaded": True | False | None, "seconds", "size_gb", "vram_gb", "error"}``.
+    """
+
+    def snapshot(self) -> Mapping[str, Any]: ...
+    def prepare(self, needed: Sequence[str], *, if_busy: str = "block") -> Mapping[str, Any]: ...
+
+
+class ModelGuides(Protocol):
+    """What each model can take (design change 0011 §5), provided by hone-models (``mk.guide``); any object
+    with this shape fits.
+
+    ``guide(model_id)`` returns the model's guide as JSON, or ``None`` for a model the source does not know:
+    ``{"id", "kind", "summary", "prompt", "inputs", "features": [{"name", "how", "input", "examples",
+    "source"}], "source", "checked", "license", "commercial_use", "sizes", "durations_s", "max_duration_s",
+    "max_references", "installed": "yes" | "no" | "unknown", "install": "<command to run>"}``. Every key is
+    optional; an unknown value is ``None``, never 0.
+    """
+
+    def guide(self, model_id: str) -> Mapping[str, Any] | None: ...

@@ -9,7 +9,8 @@ from typing import Any
 
 from hone_select.errors import ConfigError
 
-Case = dict[str, Any]  # {"id": str, "fields": {...}, "files": {name: absolute path}}
+Case = dict[str, Any]  # {"id": str, "fields": {...}, "files": {name: absolute path}} and the keys below
+RESERVED = ("needs", "per_model", "judge_view")  # case keys that are not fields (design change 0011)
 
 
 def load(folder: Path, source: str | list[str] | dict[str, str], experiments: Path) -> list[Case]:
@@ -55,9 +56,12 @@ def _from_toml(path: Path) -> list[Case]:
             raise ConfigError(f"{path}: every [[case]] needs an id")
         if any(c["id"] == str(row["id"]) for c in cases):
             raise ConfigError(f"{path}: two test cases have the id {str(row['id'])!r}")
-        cases.append(
-            {"id": str(row["id"]), "fields": {k: v for k, v in row.items() if k != "id"}, "files": {}}
-        )
+        case: Case = {
+            "id": str(row["id"]),
+            "fields": {k: v for k, v in row.items() if k != "id" and k not in RESERVED},
+            "files": {},
+        }
+        cases.append(case | {k: row[k] for k in RESERVED if k in row})
     return cases
 
 

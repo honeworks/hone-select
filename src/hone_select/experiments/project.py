@@ -2,7 +2,7 @@
 
 Status comes from the files, never from a stored flag that could disagree with them:
 no `plan.json` -> draft; a plan for an older definition -> draft (plan again); plan, no decision -> proposed;
-the last decision on this plan -> approved / denied; `run.json` -> running / stopped / completed.
+the last decision on this plan -> approved / denied; `run.json` -> running / waiting / stopped / completed.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import getpass
 import json
 import os
 import re
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -85,14 +86,26 @@ class Project:
 
     # -- plan and review --------------------------------------------------------------------------
 
-    def plan(self, eid: str, *, pilot: bool = False) -> dict[str, Any]:
-        """Validate, expand every cell, estimate, and write `plan.json` (status: proposed)."""
-        from hone_select.experiments import runner, subjects  # noqa: PLC0415 - runner imports this module
+    def plan(self, eid: str, *, pilot: bool = False, sources: Any = None) -> dict[str, Any]:
+        """Validate, expand every cell, estimate, and write `plan.json` (status: proposed). `sources`: where
+        the run-condition reading comes from (default: this machine)."""
+        from hone_select.experiments import (  # noqa: PLC0415
+            applicable,
+            conditions,
+            needs,
+            selection,
+            subjects,
+        )
 
         folder, spec, cases = self.load(eid)
         setups = d.setups(spec)
-        runner.check_criteria(spec, self.root)
-        outputs = len(cases) * len(setups) * spec.samples
+        src = sources or conditions.DEFAULT
+        needs.check_definition(spec, cases, setups)
+        selection.check_criteria(spec, self.root)
+        aware = applicable.plan_parts(spec, cases, setups, folder)
+        skip = applicable.skipped(aware)
+        cells = [(c, s) for s in setups for c in cases if (c["id"], d.setup_id(s)) not in skip]
+        outputs = len(cells) * spec.samples
         plan: dict[str, Any] = {
             "eid": folder.name.split("-", 1)[0],
             "title": spec.title,
@@ -112,18 +125,27 @@ class Project:
                 "money_usd": None,
                 "from": "unknown (run `plan --pilot` to measure)",
             },
-        }
-        if pilot:
-            sample = subjects.pilot(spec, cases[0], setups[0], folder, self.root)
-            plan["pilot"] = sample
-            per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
-            plan["estimate"] = {
-                "seconds": round(per_s * outputs, 1),
-                "money_usd": round(per_usd * outputs, 4) if per_usd is not None else None,  # unknown, not $0
-                "from": "one pilot sample (generation only; judges not included)",
-            }
+        } | aware
+        section = needs.plan_section(spec, cases, setups, src)
+        if section is not None:
+            plan["conditions"] = section
+        if pilot and cells:
+            sample = self._pilot(spec, folder, cells[0], plan, src)
+            plan |= {"pilot": sample, "estimate": _estimate(sample, outputs)}
         write_json(folder / "plan.json", plan)
         return plan
+
+    def _pilot(
+        self, spec: d.ExperimentSpec, folder: Path, cell: tuple[Any, Any], plan: dict[str, Any], src: Any
+    ) -> dict[str, Any]:
+        """One sample of the first applicable cell, under the run's rules (`plan --pilot`)."""
+        from hone_select.experiments import guard, guides, needs, subjects  # noqa: PLC0415
+
+        case, setup = cell
+        with guard.pilot(spec, folder, needs.needed(spec, case, setup), src):
+            scratch = Path(tempfile.mkdtemp(prefix="hone-pilot-"))
+            where = subjects.Where(self.root, folder, scratch, guides.for_setup(plan, setup))
+            return subjects.pilot(spec, case, setup, where)
 
     def review(self, eid: str, decision: str, note: str = "", by: str | None = None) -> dict[str, Any]:
         """Approve or deny the current plan (`review.json` keeps every decision)."""
@@ -181,8 +203,17 @@ class Project:
         return [self.status(eid) for eid in self.eids()]
 
 
+def _estimate(sample: dict[str, Any], outputs: int) -> dict[str, Any]:
+    per_s, per_usd = sample["measurements"].get("seconds", 0.0), sample.get("cost_usd")
+    return {
+        "seconds": round(per_s * outputs, 1),
+        "money_usd": round(per_usd * outputs, 4) if per_usd is not None else None,  # unknown, not $0
+        "from": "one pilot sample (generation only; judges not included)",
+    }
+
+
 def _run_state(run: dict[str, Any]) -> str:
-    if run.get("state") == "running" and not _alive(run.get("pid")):
+    if run.get("state") in ("running", "waiting") and not _alive(run.get("pid")):
         return "stopped"  # the process died without saying so
     return str(run.get("state"))
 

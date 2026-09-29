@@ -156,3 +156,160 @@ optional per-column filters and sortable headers; details in a side panel. An ex
 answer (the best setup and a chart per setting) and the next step, with the decision on top while a plan
 is proposed. `GET /api/info` returns the store and project paths and the version for the sidebar.
 Reason: the owner asked for a simple, modern and useful page; the answer and the next action come first.
+
+## D-013: where run-condition readings come from, and the CPU window  (2026-09-29)
+
+- **Question:** Design change 0010 §14 asks for injectable sources, and every sample records readings even
+  without `[conditions]`; a one-second CPU window per sample costs ten minutes on 576 samples.
+- **Choice:** `hone_select.experiments.conditions.Sources` (the `/proc` root, the `nvidia-smi` command, the
+  clock, the sleep, the poll interval, the window, and a probe object used instead of resolving
+  `[conditions] probe`); `experiments.start(..., sources=)` and `Project.plan(..., sources=)` take it, the
+  default is this machine. The CPU window is one second only when `max_cpu_load` is declared, otherwise
+  0.1 s. The wait's `since` / `until` and each reading's `at` come from the sources' clock. The default test
+  suite replaces the default sources with a quiet fake machine and points `$HONE_GPU_LOCK` at a temporary
+  file (`tests/conftest.py`).
+- **Reason:** tests never read the real machine or wait in real time; readings stay cheap when nothing
+  needs the CPU window.
+
+## D-014: one check between samples serves both, and its limits  (2026-09-29)
+
+- **Question:** 0010 §2 makes one check the "after" of a sample and the "before" of the next, with
+  `prepare` for the next sample before the reading.
+- **Choice:** as written. Consequences: at a model-group change `prepare` unloads the previous model
+  before the reading, so `models_on_gpu` judges the previous sample's model after it only while it is still
+  loaded (the before check of every sample always judges it); after the last sample the check is a
+  reading only (no `prepare`, so nothing is unloaded before scoring); a set-aside sample runs again right
+  after the conditions hold, with a fresh check (and `prepare`) when it needs other models than the next
+  sample did. Without `only_needed_models` (no `prepare`), a missing model is a needed one that is not in the
+  probe's reading; without a probe nothing is `cold`.
+- **Reason:** the simplest reading of the record; one reading per sample.
+
+## D-015: an unknown reading at the first check refuses `start`  (2026-09-29)
+
+- **Question:** 0010 §5 refuses a declared check "that cannot be measured on this machine" at start, and
+  treats a failed reading during the run like a violation. The first check cannot tell the two apart.
+- **Choice:** any `unknown` condition at the run's first check (and a `prepare` that raises there) refuses
+  `start` with the reasons and what to do; `run.json` is `stopped` with `stopped_because`. Later, `unknown`
+  counts like `outside`.
+- **Reason:** a run should not begin on readings it cannot trust; starting again is cheap.
+
+## D-016: the GPU lock is judged as the `gpu_lock` condition  (2026-09-29)
+
+- **Question:** 0010 §4 says the lock "is not a condition" (the run always waits for it), and §6 says a lock
+  or lease another process holds is `outside` when `gpu_lock` is declared.
+- **Choice:** taking the lock is not a condition (every mode waits for it up to `wait_timeout`); with
+  `gpu_lock` declared, each check also judges `gpu_lock`: `ok` while the run (or its parent) holds it,
+  `outside` when the probe reports the lock held by another process or a lease with `mine: False`. In the
+  plan, a free lock is `ok`.
+- **Reason:** another process's GPU lease disturbs a sample as much as a foreign lock.
+
+## D-017: samples outside the conditions are scored apart  (2026-09-29)
+
+- **Question:** 0010 §10 leaves outside samples out of each case's selection but lets `report
+  --include-outside` count them, which needs their totals.
+- **Choice:** the scoring phase scores them on their own (`Engine.score`, trace step
+  `experiment-outside`) and writes them to `selection.json` under `outside`; they never compete and never
+  win. This costs their judge calls.
+- **Reason:** `--include-outside` then recomputes from what is stored, without scoring again.
+
+## D-018: a cold sample's speed is its `seconds`  (2026-09-29)
+
+- **Question:** 0010 open question 9: a cold sample counts but is left out of the "speed numbers".
+- **Choice:** the speed number is the `seconds` measurement: it is left out of the results' measurements,
+  of the `measure` range and of the sample's `measure` score (the candidate carries no `seconds`); every
+  other number counts the sample.
+- **Reason:** `seconds` is the measurement hone-select takes itself; a subject's own measurements have no
+  known meaning.
+
+## D-019: the samples' environment status in the records  (2026-09-29)
+
+- **Question:** 0010 §11 says the `hone.select.generate` span of a sample shows `environment_status`, but an
+  experiment's selection uses `Engine.select`, which records no generate spans.
+- **Choice:** each candidate's meta carries `environment_status` (scorers and gates see it); the record of a
+  sample's conditions is its `result.json` and `selection.json`. No span changes.
+- **Reason:** adding generate spans to `Engine.select` would change the records of every selection.
+
+## D-020: how `client` and `guides` resolve for model-aware experiments  (2026-09-29)
+
+- **Question:** Design change 0011 §1 resolves a generate `client` "through the entry-point groups
+  hone-models 0015 registers, as `hone_models:text` is today" (today that string is imported as
+  `module:attribute`), and §5 resolves `guides` "as 0010's `MachineProbe`" (an entry point by exact name).
+- **Choice:** `client = "<name>:<kind>"` with `<kind>` image, music or video is first looked up in
+  `hone.<kind>_clients` by the entry-point name `<name>` (hone-models registers `hone_models`); otherwise it
+  is imported as `module:factory`, so `hone_models:music` works either way. `guides = "<name>"` is an entry
+  point of `hone.model_guides` by exact name, else a `module:factory` called with no arguments; with neither,
+  the `ConfigError` lists the installed sources. `guides` defaults to `hone_models:guides` when the client
+  starts with `hone_models:`.
+- **Reason:** one rule per string, the same one `hone_models:text` follows; a `module:factory` lets a project
+  (and the offline tests) bring its own client and guides without a new hone-models version.
+
+## D-021: what judges see of a case, and a generation's data  (2026-09-29)
+
+- **Question:** 0011 §4 says judges see "the case's fields and the output, never the setup, the per-model
+  overrides or the guide"; prompt judges only see a candidate's `data`.
+- **Choice:** every sample's `result.json` has `judge_view` (the case's shared fields, only those in the
+  case's `judge_view` when set) and a candidate's meta carries it as `case`. A generate sample's `data` is
+  `{"case": <judge view>, "files": [{"name", "sha256", "bytes", "mime", "width", "height", "duration_s"}]}`,
+  so a prompt judge reads the case and the output files, never the prompt a model was sent. The subject
+  itself gets the case as its model is asked (`per_model` over the fields; the shared fields stay in
+  `shared_fields`).
+- **Reason:** the judge needs to know what was asked to judge the output, and must not see a model's
+  override, or two models' outputs would be judged against different requests.
+
+## D-022: whose guide `{model_guide}` and `ctx.model_guide` are  (2026-09-29)
+
+- **Question:** 0011 §4: "a chat model writes the image prompt for a target model named in the setup,
+  given that model's guide"; the record names no factor.
+- **Choice:** the guide of the setup's `target_model` factor when it has one, else of its `model`. Both are
+  read into `plan.json` `models`. Without a guide the placeholder is empty and `ctx.model_guide` is `None`;
+  a source's own `text` (hone-models' `as_text()`) is used as is, otherwise the JSON is written out as lines.
+- **Reason:** the simplest explicit naming; prompt-writing experiments put the image model in a factor.
+
+## D-023: the needs grammar  (2026-09-29)
+
+- **Question:** 0011 §3 gives examples (`"camera angle"`, `"references"`, `"duration_s >= 60"`,
+  `"references >= 3"`, a factor value over `max_duration_s`) but no grammar.
+- **Choice:** a need `<name> >= | <= | = <value>` is a limit: `<name>` is checked against the guide's list
+  (`durations_s`, `sizes`) when it declares one, else against `max_<name>`; neither declared (or a value
+  that is not a number) is `need_unknown`. Anything else is a name, met when the guide lists it as a
+  feature or an input (case-insensitive). The factors `duration_s` and `size` add the need
+  `duration_s = <value>` / `size = <value>`. With no guide for the model every need is `need_unknown`.
+  `plan.json` `applicability` lists `not_applicable` cells (case, setup, model, the needs and the reasons)
+  and `need_unknown` cells; `outputs` counts only applicable cells; the run skips the rest; a pilot uses
+  the first applicable cell.
+- **Reason:** covers the record's examples with one small parser; unknown is never false (open question 1).
+
+## D-024: `start` asks again about models the plan found not installed  (2026-09-29)
+
+- **Question:** 0011 §4: `start` refuses "until they are installed", but guides are read once at plan time.
+- **Choice:** only for the models the plan marked `installed: "no"`, `start` asks the guide source again
+  and refuses while it still says `"no"` (naming `hone-models models install <id>`); once installed, the
+  approved plan starts without a new plan. Everything else uses the stored guides.
+- **Reason:** installing a model does not change the definition, so it should not need a new approval.
+
+## D-025: out of memory, sessions and the run order  (2026-09-29)
+
+- **Question:** 0011 §1: `out_of_memory` "with 0010's conditions" marks the sample outside; the session is
+  held "for a group of samples (`run.order = "by_model"`)".
+- **Choice:** with any condition declared, a generation whose `error_kind` is `out_of_memory` gets the
+  environment status `outside` with an `out_of_memory` check, so 0010's set-aside and rerun apply; without
+  conditions it is a failed sample. The generate subject opens the client's `session()` (when it has one)
+  for its model and keeps it while the next sample has the same model; the runner ends it when the model
+  changes (before the next check), at the end of the run and after a pilot. Grouping by model is the
+  existing default `run.order = "model"`; no `by_model` value was added. A sample set aside at the end of a
+  model's group runs again in a new session (as D-014 runs it after a fresh check).
+- **Reason:** reuses 0010's machinery without a second retry path; a new session after an out-of-memory
+  failure also frees the memory.
+
+## D-026: comparisons on shared cases  (2026-09-29)
+
+- **Question:** 0011 §3: "baseline deltas, wins and factor-level comparisons use only the cases both
+  sides can do, and say how many"; open question 3 keeps the ranking on each setup's own cases.
+- **Choice:** per setup, `applicable` = `{cases, of, not_applicable, needs, need_unknown}` and the numbers
+  over its own applicable cases (the ranking uses those means); `wins` stays the count of cases the setup
+  won. Against a baseline: the difference over the cases both setups have results for, with
+  `shared_cases`, `wins` and `losses` (cases where the setup's total is higher or lower). Each factor level
+  is computed over the cases every level can do (a level can do a case when any of its setups can), with
+  `shared_cases`. `results.json` also has `models` (license, `commercial_use`) and `could_not`.
+- **Reason:** the most direct reading of the record; a setup's own number and a fair head-to-head are both
+  shown with their counts.

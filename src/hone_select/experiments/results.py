@@ -12,9 +12,18 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from hone_select.experiments import applicable, ratings
 from hone_select.experiments import definition as d
-from hone_select.experiments import ratings
+from hone_select.experiments.outside import (
+    EXCLUDED,
+    SPEED,
+    counts,
+    environment_status,
+    is_cold,
+    off_conditions,
+)
 from hone_select.experiments.project import now, read_json, write_json
+from hone_select.experiments.summary import summary
 
 RESAMPLES = 1000
 MEASURES = ("seconds", "peak_memory_mb", "output_bytes")
@@ -28,7 +37,9 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
         selection = read_json(case_dir / "selection.json", {"samples": {}, "winner": None})
         for p in sorted(case_dir.glob("*/*/result.json")):
             r = read_json(p)
-            s = selection["samples"].get(r["sample_id"], {})
+            s = selection["samples"].get(r["sample_id"]) or selection.get("outside", {}).get(
+                r["sample_id"], {}
+            )
             out.append(
                 {
                     "sample_id": r["sample_id"],
@@ -43,6 +54,15 @@ def rows(folder: Path, spec: d.ExperimentSpec) -> list[dict[str, Any]]:
                     "measurements": r.get("measurements", {}),
                     "cost_usd": r.get("cost_usd"),
                     "human": human.get(r["sample_id"], {}),
+                    "environment_status": environment_status(r),
+                    "environment": r.get("environment"),
+                    "cold": is_cold(r),
+                    "off_conditions": off_conditions(r.get("environment")),
+                    "error_kind": r.get("error_kind"),
+                    "license": r.get("license"),
+                    "commercial_use": r.get("commercial_use"),
+                    "asked_differently": bool(r.get("asked_differently")),
+                    "need_unknown": r.get("need_unknown", []),
                 }
             )
     return out
@@ -88,10 +108,27 @@ def _stats(rs: Sequence[dict[str, Any]], spec: d.ExperimentSpec, seed: int) -> d
             for c, h in spec.human_scorers().items()
         },
         "measurements": {
-            m: _round(_mean(_case_means(rs, lambda r, m=m: r["measurements"].get(m))))
+            m: _round(_mean(_case_means(rs, lambda r, m=m: _measure(r, m))))
             for m in {k for r in rs for k in r["measurements"]}
         },
         "cost_usd": _known_sum(r["cost_usd"] for r in rs),
+    }
+
+
+def _measure(r: dict[str, Any], name: str) -> Any:
+    """A measurement; None for the speed of a cold sample (design change 0010, open question 9)."""
+    return None if r["cold"] and name in SPEED else r["measurements"].get(name)
+
+
+def _counted(
+    rs: Sequence[dict[str, Any]], spec: d.ExperimentSpec, seed: int, include: bool
+) -> dict[str, Any]:
+    """`_stats` over the samples that count, plus how many were left out."""
+    kept = [r for r in rs if include or r["environment_status"] not in EXCLUDED]
+    return {
+        **_stats(kept, spec, seed),
+        "outside": sum(r["environment_status"] == "outside" for r in rs),
+        "unknown": sum(r["environment_status"] == "unknown" for r in rs),
     }
 
 
@@ -110,11 +147,21 @@ def _round(v: float | None) -> float | None:
 
 
 def _baseline(rs: list[dict[str, Any]], base: str, setup: str, seed: int) -> dict[str, Any]:
+    """The difference to a baseline over the cases both can do (design change 0011 §3), with how many."""
     a = _case_means([r for r in rs if r["setup"] == setup], lambda r: r["total"])
     b = _case_means([r for r in rs if r["setup"] == base], lambda r: r["total"])
-    mean, low, high = interval([a[c] - b[c] for c in a if c in b], seed)
+    diffs = [a[c] - b[c] for c in a if c in b]
+    mean, low, high = interval(diffs, seed)
     clear = low is not None and high is not None and (low > 0 or high < 0)
-    return {"diff": _round(mean), "low": _round(low), "high": _round(high), "clear": clear}
+    return {
+        "diff": _round(mean),
+        "low": _round(low),
+        "high": _round(high),
+        "clear": clear,
+        "shared_cases": len(diffs),
+        "wins": sum(x > 0 for x in diffs),
+        "losses": sum(x < 0 for x in diffs),
+    }
 
 
 def _agreement(rs: list[dict[str, Any]], pairs: list[list[str]]) -> dict[str, float | None]:
@@ -129,20 +176,23 @@ def _agreement(rs: list[dict[str, Any]], pairs: list[list[str]]) -> dict[str, fl
     return out
 
 
-def compute(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[str, Any]:
-    rs = rows(folder, spec)
+def compute(
+    folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any], *, include_outside: bool = False
+) -> dict[str, Any]:
+    """The results; samples outside the run conditions are left out of every number unless
+    `include_outside` (design change 0010 §10)."""
+    every = rows(folder, spec)
+    rs = [r for r in every if include_outside or r["environment_status"] not in EXCLUDED]
     setups: dict[str, dict[str, Any]] = plan["setups"]
+
+    def stats(rows_: list[dict[str, Any]]) -> dict[str, Any]:
+        return _counted(rows_, spec, spec.seed, include_outside)
+
     per_setup = {
-        sid: {"params": params, **_stats([r for r in rs if r["setup"] == sid], spec, spec.seed)}
+        sid: {"params": params, **stats([r for r in every if r["setup"] == sid]), **_asked(plan, sid)}
         for sid, params in setups.items()
     }
-    per_factor = {
-        f: {
-            str(level): _stats([r for r in rs if r["params"].get(f) == level], spec, spec.seed)
-            for level in levels
-        }
-        for f, levels in spec.factors.items()
-    }
+    per_factor = {f: _factor(every, plan, f, levels, stats) for f, levels in spec.factors.items()}
     ranked = sorted(per_setup, key=lambda s: -(per_setup[s]["total"]["mean"] or -1e9))
     winners = {
         c: sel["winner"]
@@ -165,60 +215,60 @@ def compute(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[
             for name, base in plan["baselines"].items()
         },
         "agreement": _agreement(rs, spec.criteria.compare),
+        "samples": len(every),
+        "conditions": counts(every, spec, include_outside),
+        "models": _models(every, plan),
+        "could_not": applicable.could_not(plan),
     }
 
 
-def report(folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any]) -> dict[str, Any]:
+def report(
+    folder: Path, spec: d.ExperimentSpec, plan: dict[str, Any], *, include_outside: bool = False
+) -> dict[str, Any]:
     """Compute the results and write `results/results.json` and `results/summary.md`."""
-    res = compute(folder, spec, plan)
+    res = compute(folder, spec, plan, include_outside=include_outside)
     write_json(folder / "results" / "results.json", res)
     (folder / "results" / "summary.md").write_text(summary(res))
     return res
 
 
-def summary(res: dict[str, Any]) -> str:
-    lines = [
-        f"# {res['eid']}: {res['title']}",
-        "",
-        res["question"],
-        "",
-        f"**Best setup:** `{res['best']}` {res['setups'][res['best']]['params'] if res['best'] else ''}",
-        "",
-        "## Setups (best first)",
-        "",
-        "| setup | params | total (95 % interval) | pass rate | wins |",
-        "|---|---|---|---|---|",
-    ]
-    for sid in res["ranking"]:
-        s = res["setups"][sid]
-        t = s["total"]
-        lines.append(
-            f"| `{sid}` | {s['params']} | {t['mean']} ({t['low']} to {t['high']}) | {s['pass_rate']} | "
-            f"{s['wins']} |"
-        )
-    for factor, levels in res["factors"].items():
-        lines += [
-            "",
-            f"## {factor}",
-            "",
-            "| level | total (95 % interval) | pass rate | wins |",
-            "|---|---|---|---|",
-        ]
-        for level, s in levels.items():
-            t = s["total"]
-            lines.append(
-                f"| {level} | {t['mean']} ({t['low']} to {t['high']}) | {s['pass_rate']} | {s['wins']} |"
-            )
-    for name, diffs in res["baselines"].items():
-        lines += [
-            "",
-            f"## Against baseline `{name}`",
-            "",
-            "| setup | difference (95 % interval) | clear |",
-            "|---|---|---|",
-        ]
-        lines += [
-            f"| `{sid}` | {v['diff']} ({v['low']} to {v['high']}) | {'yes' if v['clear'] else 'no'} |"
-            for sid, v in diffs.items()
-        ]
-    return "\n".join(lines) + "\n"
+def _asked(plan: dict[str, Any], sid: str) -> dict[str, Any]:
+    """A setup's applicable cases (design change 0011 §3) and whether its model is asked differently."""
+    every: dict[str, dict[str, Any]] = plan.get("asked") or {}
+    asked = bool((every.get(sid) or {}).get("asked_differently"))
+    return {"applicable": applicable.setup_counts(plan, sid), "asked_differently": asked}
+
+
+def _factor(
+    every: list[dict[str, Any]],
+    plan: dict[str, Any],
+    factor: str,
+    levels: list[Any],
+    stats: Callable[[list[dict[str, Any]]], dict[str, Any]],
+) -> dict[str, Any]:
+    """Each level of a factor over the cases every level can do, with how many."""
+    by_level = {
+        str(level): [sid for sid, params in plan["setups"].items() if params.get(factor) == level]
+        for level in levels
+    }
+    shared = set(plan["cases"])
+    for sids in by_level.values():
+        shared &= applicable.cases_of(plan, sids)
+    return {
+        str(level): stats([r for r in every if r["params"].get(factor) == level and r["case"] in shared])
+        | {"shared_cases": len(shared)}
+        for level in levels
+    }
+
+
+def _models(every: list[dict[str, Any]], plan: dict[str, Any]) -> dict[str, Any]:
+    """License and commercial use per model, from the samples or the plan's guides; never a filter."""
+    out: dict[str, Any] = {}
+    models: dict[str, dict[str, Any]] = plan.get("models") or {}
+    for model, entry in models.items():
+        out[model] = {"license": entry.get("license"), "commercial_use": entry.get("commercial_use")}
+    for r in every:
+        model = r["params"].get("model")
+        if model is not None and (r.get("license") is not None or r.get("commercial_use") is not None):
+            out[str(model)] = {"license": r.get("license"), "commercial_use": r.get("commercial_use")}
+    return out

@@ -1,4 +1,5 @@
-"""The subject under test (design change 0009 §2a): a prompt, a Python function or a command.
+"""The subject under test (design change 0009 §2a): a prompt, a Python function or a command (a generation
+model is in `hone_select.experiments.generation`, design change 0011).
 
 `run_sample` runs one sample in its own folder and always returns a result dict: the data, the files
 produced, measurements (seconds, peak memory, exit code, output bytes), the log, or the error. A failure
@@ -10,15 +11,14 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
 from hone_select._records import scrub
 from hone_select.errors import ConfigError
-from hone_select.experiments import process
+from hone_select.experiments import guides, overrides, process
 from hone_select.experiments.definition import ExperimentSpec, GenerateSpec
 
 
@@ -29,8 +29,15 @@ class TransientError(Exception):
 class Ctx:
     """What a python subject receives besides the case and the setup."""
 
-    def __init__(self, workdir: Path, seed: int, case_files: dict[str, str]) -> None:
+    def __init__(
+        self,
+        workdir: Path,
+        seed: int,
+        case_files: dict[str, str],
+        model_guide: dict[str, Any] | None = None,
+    ) -> None:
         self.workdir, self.seed, self.case_files = workdir, seed, case_files
+        self.model_guide = model_guide  # the setup's model guide from the plan (design change 0011 §4)
 
 
 class _Attrs(dict[str, Any]):
@@ -56,11 +63,13 @@ def import_object(path: str) -> Any:
 
 
 class Where:
-    """Where a sample runs: the project root (the working directory of commands), the experiment folder
-    and the sample's own folder for the files it writes."""
+    """Where a sample runs: the project root (the working directory of commands), the experiment folder,
+    the sample's own folder for the files it writes, and the guide the plan stored for its model."""
 
-    def __init__(self, root: Path, folder: Path, workdir: Path) -> None:
-        self.root, self.folder, self.workdir = root, folder, workdir
+    def __init__(
+        self, root: Path, folder: Path, workdir: Path, guide: Mapping[str, Any] | None = None
+    ) -> None:
+        self.root, self.folder, self.workdir, self.guide = root, folder, workdir, guide
 
 
 def placeholders(case: dict[str, Any], setup: dict[str, Any], where: Where, seed: int) -> dict[str, Any]:
@@ -85,16 +94,25 @@ def preview(spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], f
         return [" ".join([*g.wrap, *(a.format_map(values) for a in g.command or [])])]
     if g.kind == "python":
         return [f"python: {g.function}(case, setup, ctx)"]
+    if g.kind == "generate":
+        inputs = ", ".join(f"{k}={v}" for k, v in g.inputs.items())
+        return [f"generate: {g.client}(<model>).generate(<{g.prompt}>, out=<workdir>/{g.output}, {inputs})"]
     return [f"prompt: {g.client}(<model>).complete(<{g.prompt}>)"]
 
 
 def run_sample(
     spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], seed: int, where: Where
 ) -> dict[str, Any]:
-    """Run one sample (with retries of transient failures) and describe what happened."""
+    """Run one sample (with retries of transient failures) and describe what happened. The subject sees
+    the case as the setup's model is asked (its `per_model` override, design change 0011 §2)."""
+    from hone_select.experiments import generation  # noqa: PLC0415 - generation imports this module
+
     workdir = where.workdir
     workdir.mkdir(parents=True, exist_ok=True)
-    runner = {"prompt": _prompt, "python": _python, "command": _command}[spec.generate.kind]
+    case = overrides.case_for(case, overrides.model_of(spec, setup))
+    runner = {"prompt": _prompt, "python": _python, "command": _command, "generate": generation.run}[
+        spec.generate.kind
+    ]
     out: dict[str, Any] = {}
     for attempt in range(spec.generate.retries + 1):
         start = time.monotonic()
@@ -111,12 +129,14 @@ def run_sample(
     return out
 
 
-def pilot(
-    spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], folder: Path, root: Path
-) -> dict[str, Any]:
-    """One real sample in a throw-away folder, to measure time and cost for the plan."""
-    scratch = Path(tempfile.mkdtemp(prefix="hone-pilot-"))
-    out = run_sample(spec, case, setup, spec.seed, Where(root, folder, scratch))
+def pilot(spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], where: Where) -> dict[str, Any]:
+    """One real sample in a throw-away folder (`where.workdir`), to measure time and cost for the plan."""
+    from hone_select.experiments import generation  # noqa: PLC0415 - generation imports this module
+
+    try:
+        out = run_sample(spec, case, setup, spec.seed, where)
+    finally:
+        generation.end_session()
     return {"measurements": out["measurements"], "cost_usd": out["cost_usd"], "error": out.get("error")}
 
 
@@ -138,23 +158,45 @@ def client(g: GenerateSpec, model: Any) -> Any:
     return _clients[key]
 
 
-def _text(template: str | None, values: dict[str, Any], prompts: Path) -> str:
+def render(template: str | None, values: dict[str, Any], where: Where, model: str | None) -> str:
+    """A template, or the prompt file it names (`prompts/<model>/<file>` first), with `values` filled."""
     if not template:
         return ""
-    if template.endswith(".md") and (prompts / template).is_file():
-        template = (prompts / template).read_text()
+    if template.endswith(".md") and (
+        found := overrides.prompt_file(where.folder / "prompts", template, model)
+    ):
+        template = found.read_text()
     return template.format_map(values).strip()
+
+
+def prompt_values(
+    spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], seed: int, where: Where
+) -> _Attrs:
+    """What a prompt template can name: the case's fields, the setup, the seed, `{model_guide}` and
+    `{prompt}` (the text of the prompt file the setup names)."""
+    values = _Attrs(
+        {
+            "case_id": case["id"],
+            **case["fields"],
+            **setup,
+            "seed": seed,
+            "model_guide": guides.text(where.guide),
+        }
+    )
+    if "prompt" in setup:
+        values["prompt"] = render(str(setup["prompt"]), values, where, overrides.model_of(spec, setup))
+    return values
 
 
 def _prompt(
     spec: ExperimentSpec, case: dict[str, Any], setup: dict[str, Any], seed: int, where: Where
 ) -> dict[str, Any]:
-    g, prompts = spec.generate, where.folder / "prompts"
-    values = _Attrs({"case_id": case["id"], **case["fields"], **setup, "seed": seed})
-    if "prompt" in setup:
-        values["prompt"] = _text(str(setup["prompt"]), values, prompts)
-    messages = [{"role": "system", "content": _text(g.system, values, prompts)}] if g.system else []
-    messages.append({"role": "user", "content": _text(g.prompt, values, prompts)})
+    g, model = spec.generate, overrides.model_of(spec, setup)
+    values = prompt_values(spec, case, setup, seed, where)
+    messages = [{"role": "system", "content": render(g.system, values, where, model)}] if g.system else []
+    messages.append(
+        {"role": "user", "content": render(overrides.generate_for(g, model)[0], values, where, model)}
+    )
     params = {
         k: setup[k] for k in (g.params if g.params is not None else setup) if k not in ("model", "prompt")
     }
@@ -207,6 +249,7 @@ def _python(
             "workdir": str(where.workdir),
             "result": str(result),
             "paths": [str(where.root), str(where.folder / "scripts")],
+            "model_guide": where.guide,
         }
     )
     argv = [*g.wrap, sys.executable, "-m", "hone_select.experiments._child"]
