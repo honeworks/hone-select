@@ -2,8 +2,9 @@
 
 ## Status
 
-`proposed` (2026-09-29, from the owner's request; awaiting approval). Revised the same day: subjects
-that are code or programs, file inputs and outputs, measurements and the owner's ratings.
+`accepted` (approved by the owner 2026-09-29, with the answers in "Owner decisions" below). Revised
+before approval: subjects that are code or programs, file inputs and outputs, measurements and the owner's
+ratings.
 
 ## Context
 
@@ -79,8 +80,8 @@ experiments/
       summary.md           the same as a readable table, with the chosen setup and why
 ```
 
-The definition, cases, prompts, plan, review and results are committed; `outputs/` is committed for text
-(small) and git-ignored by a generated `.gitignore` above a size limit (media later).
+Everything in the folder is committed, outputs and their files included: an experiment stays as evidence.
+hone-select writes no `.gitignore`; a project that does not want some outputs in git ignores them itself.
 
 ```toml
 # experiments/E0001-open-weight-writing/experiment.toml
@@ -164,7 +165,7 @@ command = ["blender", "-b", "{case.scene}", "--python", "scripts/render.py", "--
 timeout = 1800
 wrap = ["scripts/gpu-lock.sh"]     # run inside a wrapper (the machine-wide GPU lock, a container, ...)
 env = { BLENDER_USER_SCRIPTS = "scripts/blender" }
-keep_files = "all"                 # all | small (under 20 MB each, the rest hashed and deleted) | none
+keep_files = "all"                 # all (default) | small (under 20 MB each, the rest hashed and deleted) | none
 ```
 
 Examples of the non-AI experiments this covers:
@@ -281,11 +282,9 @@ unchanged; experiment runs are ordinary selection runs with the experiment id in
 StoryRoom moves its C3 screen to `experiments/E0001-...`; the partial C3 run stays in its run folder as
 history.
 
-## Open questions for the owner
+## Owner decisions (2026-09-29)
 
-1. **Generated outputs in git:** commit text outputs (proposed) or keep all outputs out of git?
-2. **Default design:** `full` (proposed; the plan shows the size) or `one_at_a_time` to start small?
-3. **The pilot:** should `plan` always run one cell to measure time and cost (more accurate, costs a
-   little), or only with `--pilot` (proposed)?
-4. **Output files:** keep every file (renders, audio) by default, or only small ones (`keep_files =
-   "small"`, proposed) with the large ones hashed and deleted after scoring?
+1. **Outputs are committed:** experiments stay in git with their outputs, unless the project ignores them.
+2. **Default design:** `full` (every combination); the plan shows the size before approval.
+3. **The pilot:** `plan` measures time and cost only with `--pilot`.
+4. **Output files:** all kept by default (`keep_files = "all"`).
