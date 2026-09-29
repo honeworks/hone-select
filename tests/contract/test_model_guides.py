@@ -131,3 +131,6 @@ def test_the_adapter_needs_hone_models_with_guides(monkeypatch: pytest.MonkeyPat
     monkeypatch.setitem(sys.modules, "hone_models.errors", None)  # a hone-models without errors
     with pytest.raises(ConfigError, match="update hone-models"):
         resolver.guides()
+    monkeypatch.setitem(sys.modules, "hone_models.errors", types.ModuleType("hone_models.errors"))
+    with pytest.raises(ConfigError, match="update hone-models"):  # errors without ConfigError
+        resolver.guides()
