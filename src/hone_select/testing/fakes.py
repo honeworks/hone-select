@@ -134,3 +134,115 @@ class FakeEmbedder:
         raw = [b / 127.5 - 1.0 for b in digest[: self.dimensions]]
         norm = math.sqrt(sum(x * x for x in raw)) or 1.0
         return [x / norm for x in raw]
+
+
+def _machine_snapshot() -> dict[str, Any]:
+    """A quiet machine: one 8 GB GPU, idle, Ollama running with nothing loaded, the lock free."""
+    gpu: dict[str, Any] = {
+        "index": 0,
+        "name": "Fake GPU",
+        "memory_total_gb": 8.0,
+        "memory_used_gb": 0.0,
+        "memory_free_gb": 8.0,
+        "utilization_pct": 0,
+        "processes": [],
+    }
+    return {
+        "time": "2026-01-01T00:00:00Z",
+        "gpus": [gpu],
+        "servers": [{"server": "ollama", "running": True, "error": None}],
+        "gpu_lock": {"path": None, "held": False, "holder": None, "mine": False},
+        "leases": [],
+    }
+
+
+class FakeMachineProbe:
+    """A ``MachineProbe`` (design change 0010 §6) with a live list of loaded models.
+
+    ``snapshots`` are scripted answers of ``snapshot()``, one per call, repeating the last (default: a quiet
+    machine); ``loaded_models`` comes from the live list ``loaded`` unless a scripted snapshot sets it.
+    ``prepare`` records ``needed`` in ``calls`` and unloads every loaded model that is not needed, except
+    while ``blocked_by`` is set and ``if_busy`` is ``"block"``; a model named in ``errors`` fails to unload.
+    ``raises`` makes ``snapshot`` and ``prepare`` raise it. ``loads`` (model id -> answer) adds a ``load``
+    method; an answer with ``loaded: True`` adds the model to ``loaded``. Change the attributes between
+    calls to script a machine that changes.
+    """
+
+    def __init__(
+        self,
+        snapshots: Sequence[Mapping[str, Any]] | None = None,
+        *,
+        loaded: Sequence[Mapping[str, Any]] = (),
+        blocked_by: Sequence[Any] | None = None,
+        errors: Mapping[str, str] | None = None,
+        raises: Exception | None = None,
+        loads: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
+        self.snapshots = [dict(s) for s in snapshots or [{}]]
+        self.loaded = [dict(m) for m in loaded]
+        self.blocked_by = list(blocked_by) if blocked_by is not None else None
+        self.errors = dict(errors or {})
+        self.raises = raises
+        self.loads = dict(loads) if loads is not None else None
+        self.calls: list[dict[str, Any]] = []
+        if loads is not None:
+            self.load = self._load
+
+    def snapshot(self) -> dict[str, Any]:
+        count = sum(c["call"] == "snapshot" for c in self.calls)
+        self.calls.append({"call": "snapshot"})
+        if self.raises is not None:
+            raise self.raises
+        scripted = self.snapshots[min(count, len(self.snapshots) - 1)]
+        return {**_machine_snapshot(), "loaded_models": [dict(m) for m in self.loaded], **scripted}
+
+    def prepare(self, needed: Sequence[str], *, if_busy: str = "block") -> dict[str, Any]:
+        self.calls.append({"call": "prepare", "needed": list(needed), "if_busy": if_busy})
+        if self.raises is not None:
+            raise self.raises
+        blocked = self.blocked_by is not None and if_busy == "block"
+        unneeded = [m for m in self.loaded if m.get("model_id") not in needed]
+        failed = [m for m in unneeded if m.get("name") in self.errors]
+        unloaded = [] if blocked else [m for m in unneeded if m not in failed]
+        self.loaded = [m for m in self.loaded if m not in unloaded]
+        ids = [m.get("model_id") for m in self.loaded]
+        sizes = [m.get("size_gb") or 0.0 for m in self.loaded if m.get("model_id") in needed]
+        return {
+            "needed": list(needed),
+            "if_busy": if_busy,
+            "blocked_by": self.blocked_by,
+            "unloaded": [{"server": m.get("server"), "name": m.get("name")} for m in unloaded],
+            "released": [],
+            "errors": []
+            if blocked
+            else [
+                {"server": m.get("server"), "name": m.get("name"), "error": self.errors[m["name"]]}
+                for m in failed
+            ],
+            "missing": [n for n in needed if n not in ids],
+            "loaded_models": [dict(m) for m in self.loaded],
+            "need_gb": sum(sizes),
+        }
+
+    def _load(self, model_id: str) -> dict[str, Any]:
+        self.calls.append({"call": "load", "model_id": model_id})
+        answer: dict[str, Any] = {
+            "model_id": model_id,
+            "loaded": True,
+            "seconds": 1.0,
+            "size_gb": 4.0,
+            "vram_gb": 4.0,
+        }
+        answer |= dict((self.loads or {}).get(model_id, {}))
+        answer.setdefault("error", None)
+        if answer["loaded"] is True:
+            self.loaded.append(
+                {
+                    "server": "ollama",
+                    "name": model_id,
+                    "model_id": model_id,
+                    "size_gb": answer["size_gb"],
+                    "vram_gb": answer["vram_gb"],
+                }
+            )
+        return answer

@@ -4,13 +4,14 @@ their implementations; each raises ``AssertionError`` on a mismatch."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from hone_select.ports import get
 
 __all__ = [
     "check_decision_client",
     "check_embedder",
+    "check_machine_probe",
     "check_record_sink",
     "check_text_client",
     "example_span",
@@ -84,3 +85,35 @@ def example_span() -> dict[str, Any]:
         "resource": {},
         "links": [],
     }
+
+
+def _list_of_mappings(value: Any, key: str) -> None:
+    assert isinstance(value, list), f"{key} must be a list"
+    assert all(isinstance(item, Mapping) for item in value), f"every item of {key} must be a mapping"  # pyright: ignore[reportUnknownVariableType]
+
+
+def check_machine_probe(probe: Any) -> None:
+    """``snapshot()`` returns a mapping of the documented shape; ``prepare([])`` returns a mapping
+    (design change 0010 §6). Every key is optional; ``load`` is not called (it would load a model)."""
+    answer = probe.snapshot()
+    assert isinstance(answer, Mapping)
+    snap = cast(Mapping[str, Any], answer)
+    if snap.get("gpus") is not None:
+        _list_of_mappings(snap["gpus"], "gpus")
+    for key in ("servers", "loaded_models", "leases"):
+        if key in snap:
+            _list_of_mappings(snap[key], key)
+    servers: list[Mapping[str, Any]] = snap.get("servers", [])
+    models: list[Mapping[str, Any]] = snap.get("loaded_models", [])
+    for server in servers:
+        assert server.get("running") in (True, False, None), "servers[].running is True, False or None"
+    for model in models:
+        assert isinstance(model.get("name"), str), "loaded_models[].name is a string"
+    if snap.get("gpu_lock") is not None:
+        assert isinstance(snap["gpu_lock"], Mapping)
+    reply = probe.prepare([])
+    assert isinstance(reply, Mapping)
+    prepared = cast(Mapping[str, Any], reply)
+    for key in ("unloaded", "errors", "missing", "loaded_models"):
+        if key in prepared:
+            assert isinstance(prepared[key], list), f"prepare()[{key!r}] must be a list"

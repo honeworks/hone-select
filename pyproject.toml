@@ -49,6 +49,9 @@ hone-select = "hone_select.cli:main"
 [project.entry-points."hone.decision_clients"]
 "hone_models:decision" = "hone_select.adapters.hone_models:decision"
 
+[project.entry-points."hone.machine_probes"]
+"hone_models:machine" = "hone_select.adapters.hone_models:machine"
+
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
