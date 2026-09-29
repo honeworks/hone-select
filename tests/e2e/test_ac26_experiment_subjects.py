@@ -78,6 +78,7 @@ def test_ac26_prompt_subject(tmp_path: Path) -> None:
     assert by_model["big"]["data"] == {"premise": "a long and careful reply"}
     assert by_model["big"]["error"] is None
     assert by_model["tiny"]["error"] == "the output is not valid JSON"
+    assert by_model["big"]["cost_usd"] is None  # the client reported no cost: unknown, not $0
 
 
 @pytest.mark.parametrize(
@@ -191,7 +192,7 @@ def test_ac26_secrets_stay_out_of_records(tmp_path: Path, monkeypatch: pytest.Mo
     (tmp_path / "scripts" / "leaky.py").write_text(LEAKY)
     exp = experiment(
         f'kind = "command"\ncommand = ["python3", "{{root}}/scripts/leaky.py"]\n'
-        f'env = {{ API_KEY = "{value}" }}',
+        f'env = {{ API_KEY = "{value}", password = "hunter2-plain" }}',
         'model = ["m"]',
     )
     p, folder = approved(tmp_path, exp, CASES.split('[[case]]\nid = "ferry"')[0])
@@ -202,7 +203,37 @@ def test_ac26_secrets_stay_out_of_records(tmp_path: Path, monkeypatch: pytest.Mo
     written = [q for q in folder.rglob("*") if q.is_file() and q.name != "experiment.toml"]
     assert all(SECRET.encode() not in q.read_bytes() for q in written)
     assert SECRET.encode() not in (tmp_path / ".hone" / "select" / "spans.db").read_bytes()
-    assert SECRET not in json.dumps(detail(p, "E0001"))
+    served = json.dumps(detail(p, "E0001"))
+    assert SECRET not in served
+    assert "hunter2-plain" not in served  # no key shape: hidden only because its key is named like a secret
+    assert 'password = "***"' in detail(p, "E0001")["definition"]
     if form == "variable":
         assert SECRET not in (folder / "experiment.toml").read_text()
     make_server(tmp_path / ".hone" / "select" / "spans.db", port=0, project=tmp_path).server_close()
+
+
+FAILING_LEAK = """
+import json, os, sys
+json.loads(sys.stdin.read())
+print("could not log in with", os.environ["API_KEY"], file=sys.stderr)
+sys.exit(2)
+"""
+
+
+def test_ac26_a_secret_in_a_failing_subject_error_is_scrubbed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HONE_TEST_SECRET", SECRET)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "fail.py").write_text(FAILING_LEAK)
+    exp = experiment(
+        'kind = "command"\ncommand = ["python3", "{root}/scripts/fail.py"]\n'
+        'env = { API_KEY = "$HONE_TEST_SECRET" }',
+        'model = ["m"]',
+    )
+    p, folder = approved(tmp_path, exp, CASES.split('[[case]]\nid = "ferry"')[0])
+    start(p, "E0001")
+    (row,) = results(folder)
+    assert row["error"].startswith("exit code 2: could not log in with ***")
+    assert SECRET not in row["error"]
+    assert SECRET not in row["log"]

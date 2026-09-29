@@ -232,6 +232,9 @@ def _page() -> bytes:
     return resources.files("hone_select").joinpath("dashboard.html").read_bytes()
 
 
+LOOPBACK = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
 def _routes(db: Path, project: Path | None) -> Callable[[str], tuple[int, str, bytes]]:
     def answer(path: str) -> tuple[int, str, bytes]:
         if path in ("/", "/index.html"):
@@ -254,20 +257,10 @@ def _routes(db: Path, project: Path | None) -> Callable[[str], tuple[int, str, b
     return answer
 
 
-def make_server(
-    db: str | Path, host: str = "127.0.0.1", port: int = 8788, project: str | Path | None = None
-) -> ThreadingHTTPServer:
-    """The dashboard server (not started): ``server.serve_forever()`` runs it; port 0 picks a free port.
-
-    ``project`` (a folder with ``experiments/``) adds the Experiments pages (design change 0009); the span
-    store may then be missing (no selection has run yet)."""
-    store = Path(db)
-    root = Path(project).resolve() if project is not None else None
-    if not store.exists() and not (root is not None and web.has_experiments(root)):
-        raise HoneSelectError(
-            f"no span store at {str(store)!r} and no experiments; pass --db or --project, or set HONE_HOME"
-        )
-    answer = _routes(store, root)
+def _handler(
+    answer: Callable[[str], tuple[int, str, bytes]], root: Path | None, host: str
+) -> type[BaseHTTPRequestHandler]:
+    """The request handler: GET answers the routes, POST the experiment writes (design changes 0008, 0009)."""
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, reply: tuple[int, str, bytes]) -> None:
@@ -278,14 +271,16 @@ def make_server(
             self.end_headers()
             self.wfile.write(body)
 
-        def _allowed(self) -> set[str]:
-            """The Host values this server answers: its own address (a DNS-rebinding page sends its own
-            host name and is refused)."""
+        def _allowed(self) -> set[str] | None:
+            """The Host values a loopback-bound server answers (a DNS-rebinding page sends its own host
+            name and is refused); None, any Host, when bound to another address (design/decisions.md)."""
+            if host not in LOOPBACK:
+                return None
             port = cast(tuple[str, int], self.server.server_address)[1]
             return {f"{h}:{port}" for h in ("127.0.0.1", "localhost", "[::1]", host)}
 
         def do_GET(self) -> None:
-            if self.headers.get("Host", "") not in self._allowed():
+            if not web.host_ok(self.headers, self._allowed()):
                 self._send((403, "application/json", b'{"error": "unknown Host"}'))
                 return
             self._send(answer(self.path.split("?", 1)[0]))
@@ -302,8 +297,26 @@ def make_server(
         def log_message(self, format: str, *args: Any) -> None:
             pass
 
+    return Handler
+
+
+def make_server(
+    db: str | Path, host: str = "127.0.0.1", port: int = 8788, project: str | Path | None = None
+) -> ThreadingHTTPServer:
+    """The dashboard server (not started): ``server.serve_forever()`` runs it; port 0 picks a free port.
+
+    ``project`` (a folder with ``experiments/``) adds the Experiments pages (design change 0009); the span
+    store may then be missing (no selection has run yet)."""
+    store = Path(db)
+    root = Path(project).resolve() if project is not None else None
+    if not store.exists() and not (root is not None and web.has_experiments(root)):
+        raise HoneSelectError(
+            f"no span store at {str(store)!r} and no experiments; pass --db or --project, or set HONE_HOME"
+        )
+    handler = _handler(_routes(store, root), root, host)
+
     try:
-        return ThreadingHTTPServer((host, port), Handler)
+        return ThreadingHTTPServer((host, port), handler)
     except OSError as e:
         raise HoneSelectError(
             f"cannot listen on {host}:{port} ({e}); pass another --port (0 = any free)"

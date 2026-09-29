@@ -17,6 +17,7 @@ import mimetypes
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from hone_select._records import scrub
 from hone_select.engine import SECRET_KEY
@@ -121,15 +122,23 @@ def post(project: Project, path: str, body: bytes) -> Reply:
         return _error(str(e))
 
 
-def same_origin(headers: Any, allowed: set[str]) -> bool:
-    """A write must come from the dashboard page itself: to one of the server's own addresses (`allowed`
-    Host values; a DNS-rebinding page is refused), with the page's custom header (a cross-site form cannot
-    send it without a preflight this server never allows) and, when present, an Origin on the same
-    address."""
-    if headers.get("Host", "") not in allowed or headers.get("X-Hone-Dashboard") != "1":
+def host_ok(headers: Any, allowed: set[str] | None) -> bool:
+    """Whether the request's Host is one this server answers. `allowed` is None for a non-loopback bind
+    (reached by LAN addresses or names the server cannot list), where any Host is accepted."""
+    return allowed is None or headers.get("Host", "") in allowed
+
+
+def same_origin(headers: Any, allowed: set[str] | None) -> bool:
+    """A write must come from the dashboard page itself: an allowed Host (a DNS-rebinding page is refused on
+    a loopback bind), the page's custom header (a cross-site form cannot send it without a preflight this
+    server never allows) and, when present, an http(s) Origin on the same address as the Host."""
+    if not host_ok(headers, allowed) or headers.get("X-Hone-Dashboard") != "1":
         return False
     origin = headers.get("Origin")
-    return origin is None or origin.removeprefix("http://") in allowed
+    if origin is None:
+        return True
+    parts = urlsplit(str(origin))
+    return parts.scheme in ("http", "https") and parts.netloc == headers.get("Host", "")
 
 
 def has_experiments(root: Path) -> bool:

@@ -209,3 +209,53 @@ def test_ac27_one_run_at_a_time(tmp_path: Path) -> None:
     assert start(p, "E0001")["status"] == "completed"
     with pytest.raises(HoneSelectError, match="is completed"):
         start(p, "E0001")
+
+
+COSTS = """
+from hone_select import Candidate
+
+
+def priced(case, setup, ctx):
+    meta = {"cost_usd": 0.25} if setup["pricing"] == "known" else {}
+    return Candidate.of(f"{case['id']} {setup['pricing']}", meta=meta)
+"""
+
+
+def test_ac27_known_costs_add_up_and_unknown_ones_stay_unknown(tmp_path: Path) -> None:
+    (tmp_path / "costs.py").write_text(COSTS)
+    exp = (
+        'title = "t"\nregistry = []\n[generate]\nkind = "python"\nfunction = "costs:priced"\n'
+        '[factors]\npricing = ["known", "unknown"]\n'
+    )
+    p, folder = approved(tmp_path, exp)
+    start(p, "E0001")
+    res = json.loads((folder / "results" / "results.json").read_text())
+    known = res["setups"][d.setup_id({"pricing": "known"})]
+    unknown = res["setups"][d.setup_id({"pricing": "unknown"})]
+    assert known["cost_usd"] == 0.5  # 2 cases x $0.25
+    assert unknown["cost_usd"] is None
+    assert res["factors"]["pricing"]["known"]["cost_usd"] == 0.5
+    rows = [json.loads(q.read_text()) for q in folder.glob("outputs/*/*/*/result.json")]
+    assert sorted(r["cost_usd"] is None for r in rows) == [False, False, True, True]
+
+
+@pytest.mark.parametrize(("pricing", "done"), [("unknown", 4), ("known", 1)])
+def test_ac27_a_money_budget_counts_known_costs_only(tmp_path: Path, pricing: str, done: int) -> None:
+    (tmp_path / "costs.py").write_text(COSTS)
+    exp = (
+        'title = "t"\n[generate]\nkind = "python"\nfunction = "costs:priced"\n'
+        f'[factors]\npricing = ["{pricing}"]\n[budget]\nmoney_usd = 0.1\n'
+    )
+    p, _ = approved(tmp_path, exp.replace('title = "t"\n', 'title = "t"\nsamples = 2\n'))
+    status = start(p, "E0001")
+    assert status["done"] == done  # unknown costs never reach the budget; one known $0.25 does
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0.5, 0.5), (0, 0.0), (True, None), (float("nan"), None), (-1, None), ("0.5", None), (None, None)],
+)
+def test_ac27_what_counts_as_a_cost(value: object, expected: float | None) -> None:
+    from hone_select.experiments.process import cost
+
+    assert cost(value) == expected

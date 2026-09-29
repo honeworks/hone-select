@@ -185,3 +185,32 @@ def test_ac29_a_foreign_host_is_refused(served: tuple[str, Path]) -> None:
     status, _ = call(base + "/api/experiments/E0002/review", {"decision": "approve"}, {**PAGE, **rebinding})
     assert status == 403
     assert call(base + "/api/experiments", headers={"Host": f"localhost:{port}"})[0] == 200
+
+
+def test_ac29_write_origin_rules(served: tuple[str, Path]) -> None:
+    base, _ = served
+    port = base.rsplit(":", 1)[1]
+    approve = base + "/api/experiments/E0002/review"
+    body = {"decision": "approve", "note": "ok"}
+    assert (
+        call(approve, body, {**PAGE, "Origin": "http://evil.example"})[0] == 403
+    )  # foreign Origin, valid Host
+    assert (
+        call(approve, body, {**PAGE, "Origin": f"http://127.0.0.1:{int(port) + 1}"})[0] == 403
+    )  # wrong port
+    assert call(approve, body, {"Content-Type": "application/json"})[0] == 403  # no page header
+    assert call(approve, body, {**PAGE, "Origin": f"127.0.0.1:{port}"})[0] == 403  # not a valid Origin
+    status, answer = call(approve, body, {**PAGE, "Origin": f"https://127.0.0.1:{port}"})
+    assert (status, answer["decision"]) == (200, "approved")
+
+
+def test_ac29_a_network_bind_answers_other_hosts(tmp_path: Path) -> None:
+    project(tmp_path)
+    srv = make_server(tmp_path / "none.db", host="0.0.0.0", port=0, project=tmp_path)  # noqa: S104 - the test
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_port}/api/experiments"
+        assert call(url, headers={"Host": f"studio.lan:{srv.server_port}"})[0] == 200  # a LAN name
+    finally:
+        srv.shutdown()
+        srv.server_close()
